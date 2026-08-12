@@ -108,14 +108,27 @@ export default router.post(
                 const storyboard = await u
                   .db("o_storyboard")
                   .where("o_storyboard.id", item.id)
-                  .select("videoDesc", "prompt", "track", "duration", "shouldGenerateImage")
+                  .select("videoDesc", "prompt", "track", "duration", "shouldGenerateImage", "index", "scriptId", "projectId")
                   .first();
+                // 查询相邻分镜（同 scriptId 内、index 更小的前 2 条），用于注入跨镜剧情上下文
+                let prevStoryboards: { videoDesc?: string; index?: number }[] = [];
+                if (storyboard?.index != null) {
+                  prevStoryboards = await u
+                    .db("o_storyboard")
+                    .where("o_storyboard.projectId", storyboard.projectId)
+                    .where("o_storyboard.scriptId", storyboard.scriptId)
+                    .where("o_storyboard.index", "<", storyboard.index)
+                    .orderBy("o_storyboard.index", "desc")
+                    .limit(2)
+                    .select("videoDesc", "index");
+                }
                 // 查询分镜关联的资产ID
                 const assetRows = await u.db("o_assets2Storyboard").where("storyboardId", item.id).orderBy("rowid").select("assetId");
                 const associateAssetsIds = assetRows.map((row: any) => row.assetId);
                 return {
                   ...storyboard,
                   associateAssetsIds,
+                  prevStoryboards,
                   _type: "storyboard",
                 };
               }
@@ -155,8 +168,19 @@ export default router.post(
                 duration: item.duration,
                 associateAssetsIds: item.associateAssetsIds,
                 shouldGenerateImage: item.shouldGenerateImage,
+                prevStoryboards: item.prevStoryboards,
               });
           }
+
+          const storyboardContext = storyboard
+            .map((i: any) => {
+              const prevDesc = (i.prevStoryboards || [])
+                .map((p: any) => `【第${p.index}镜】${p.videoDesc}`)
+                .join("\n");
+              const curDesc = `【本镜】${i.videoDesc}`;
+              return prevDesc ? `上一镜剧情：\n${prevDesc}\n${curDesc}` : curDesc;
+            })
+            .join("\n\n");
 
           const content = `
           **模型名称**：${modelData},
@@ -164,6 +188,8 @@ export default router.post(
             .filter((i: any) => i.filePath)
             .map((i: any) => `[${i.id},${i.type},${i.name}]`)
             .join("，")},
+          **剧情上下文**（上一镜与本镜分镜，用于镜头间剧情呼应、动作承接）：
+${storyboardContext}
           **分镜信息**：${storyboard.map(
             (i: any) => `<storyboardItem
   videoDesc='${i.videoDesc}'
