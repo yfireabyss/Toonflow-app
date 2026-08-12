@@ -94,7 +94,7 @@ export default async function startServe(randomPort: Boolean = false) {
           sizeOpts = { type: "percentage", value: pct };
         } else {
           // 无效的 size 参数，降级返回原图
-          express.static(ossDir, { acceptRanges: false })(req, res, next);
+          express.static(ossDir, { acceptRanges: true })(req, res, next);
           return;
         }
 
@@ -108,14 +108,16 @@ export default async function startServe(randomPort: Boolean = false) {
             res.sendFile(thumbnailPath);
           } else {
             // 缩略图生成失败，降级返回原图
-            express.static(ossDir, { acceptRanges: false })(req, res, next);
+            express.static(ossDir, { acceptRanges: true })(req, res, next);
           }
         });
         return;
       }
       next();
     },
-    express.static(ossDir, { acceptRanges: false }),
+    // acceptRanges: true 让视频文件支持 Range 请求（webav/MP4Box 等需要 Range 才能解 MP4 moov box）
+    // 之前默认 false 会导致 Range 请求返回 200 全量而非 206 片段，剪辑台 webav 预览黑屏
+    express.static(ossDir, { acceptRanges: true }),
   );
   // skills 静态资源
   const skillsDir = u.getPath("skills");
