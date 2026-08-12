@@ -140,11 +140,12 @@ const vendor: VendorConfig = {
   description: "MiniMax官方接口适配，支持M系列推理文本模型、文生图/图生图、视频生成（文生视频、图生视频、首尾帧生成）能力 \n [前往平台](https://minimaxi.com/)",
   inputs: [
     { key: "apiKey", label: "API密钥", type: "password", required: true },
-    { key: "baseUrl", label: "请求地址", type: "url", required: true, placeholder: "示例：https://api.minimaxi.com" },
+    { key: "baseUrl", label: "请求地址", type: "url", required: true, placeholder: "以 /v1 结尾，示例：https://api.minimaxi.com/v1" },
   ],
-  inputValues: { apiKey: "", baseUrl: "https://api.minimaxi.com" },
+  inputValues: { apiKey: "", baseUrl: "https://api.minimaxi.com/v1" },
   models: [
     // 文本模型
+    { name: "MiniMax-M3 (推理版)", modelName: "MiniMax-M3", type: "text", think: true },
     { name: "MiniMax-M2.7 (推理版)", modelName: "MiniMax-M2.7", type: "text", think: true },
     { name: "MiniMax-M2.7 极速版 (推理版)", modelName: "MiniMax-M2.7-highspeed", type: "text", think: true },
     { name: "MiniMax-M2.5 (推理版)", modelName: "MiniMax-M2.5", type: "text", think: true },
@@ -230,7 +231,8 @@ const textRequest = (model: TextModel, think: boolean, thinkLevel: 0 | 1 | 2 | 3
   const apiKey = vendor.inputValues.apiKey.replace(/^Bearer\s+/i, "");
   const baseUrl = getBaseUrl();
 
-  const openaiBaseUrl = `${baseUrl}/v1`;
+  // createOpenAI 内部会拼 /v1/{endpoint}，vendor 配置里的 baseUrl 必须以 /v1 结尾（含供应商要求的固定路径前缀）
+  const openaiBaseUrl = baseUrl;
   const extraBody = model.think ? { reasoning_split: true } : {};
   return createOpenAI({ baseURL: openaiBaseUrl, apiKey, extraBody }).chat(model.modelName);
 };
