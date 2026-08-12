@@ -111,6 +111,8 @@ export default router.post(
       )
       .then(async () => await aiVideo.save(videoPath))
       .then(async () => await u.db("o_video").where("id", videoId).update({ state: "生成成功" }))
+      // 视频生成成功后，自动绑定到对应 track.videoId，否则剪辑界面因 selectVideoId=0 拿不到预览 src
+      .then(async () => await u.db("o_videoTrack").where("id", trackId).update({ videoId }))
       .catch(async (error: any) => {
         await u
           .db("o_video")
