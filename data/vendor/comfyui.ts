@@ -804,6 +804,8 @@ function buildLtx2_3T2vFull(prompt: string, width: number, height: number, lengt
 
 function buildLtx2_3I2vNvfp4(prompt: string, width: number, height: number, length: number, seed: number, refImage: string): any {
   // nvfp4 + gemma + ltx projection + 8 步快速 i2v
+  // 2026-08-14 修复: 原实现 ImageScale 输出无下游引用, 首帧图从未进入 latent(假 i2v 实为 t2v)
+  // 改为 LTXVImgToVideo 把首帧编码进 latent 并输出 conditioning, 采样器吃它的 latent
   return {
     "1": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "ltx-2.3-22b-dev-nvfp4.safetensors" } },
     "2": { class_type: "LTXAVTextEncoderLoader", inputs: { text_encoder: "gemma_3_12B_it_fpmixed.safetensors", ckpt_name: "ltx-2.3-22b-dev-nvfp4.safetensors", device: "default" } },
@@ -811,15 +813,14 @@ function buildLtx2_3I2vNvfp4(prompt: string, width: number, height: number, leng
     "4": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: NEGATIVE_VIDEO } },
     "20": { class_type: "LoadImage", inputs: { image: refImage } },
     "21": { class_type: "ImageScale", inputs: { image: ["20", 0], width, height, upscale_method: "lanczos", crop: "center" } },
-    "5": { class_type: "EmptyLTXVLatentVideo", inputs: { width, height, length, batch_size: 1 } },
-    "6": { class_type: "LTXVConditioning", inputs: { positive: ["3", 0], negative: ["4", 0], frame_rate: 24 } },
+    "22": { class_type: "LTXVImgToVideo", inputs: { positive: ["3", 0], negative: ["4", 0], vae: ["1", 2], image: ["21", 0], width, height, length, batch_size: 1, strength: 1.0 } },
     "7": { class_type: "LTXVScheduler", inputs: { steps: 8, max_shift: 2.05, base_shift: 0.95, stretch: true, terminal: 0.1 } },
     "8": { class_type: "KSamplerSelect", inputs: { sampler_name: "euler" } },
     "9": {
       class_type: "SamplerCustom",
       inputs: {
-        model: ["1", 0], positive: ["6", 0], negative: ["6", 1],
-        sampler: ["8", 0], sigmas: ["7", 0], latent_image: ["5", 0],
+        model: ["1", 0], positive: ["22", 0], negative: ["22", 1],
+        sampler: ["8", 0], sigmas: ["7", 0], latent_image: ["22", 2],
         add_noise: true, noise_seed: seed, cfg: 1.0,
       },
     },
@@ -829,7 +830,8 @@ function buildLtx2_3I2vNvfp4(prompt: string, width: number, height: number, leng
 }
 
 function buildLtx2_3StartEnd(prompt: string, width: number, height: number, length: number, seed: number, startImg: string, endImg: string | null): any {
-  // 蒸馏 13B + 首尾帧(用空 latent + 加噪,简版)
+  // 蒸馏 13B + 首尾帧
+  // 2026-08-14 修复: 原实现 VAEEncode 输出无下游引用(假 i2v), 改为 LTXVImgToVideo 真 i2v
   return {
     "1": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "ltxv-13b-0.9.8-distilled-fp8.safetensors" } },
     "2": { class_type: "CLIPLoader", inputs: { clip_name: "t5xxl_fp16.safetensors", type: "ltxv", device: "default" } },
@@ -837,16 +839,14 @@ function buildLtx2_3StartEnd(prompt: string, width: number, height: number, leng
     "4": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: NEGATIVE_VIDEO } },
     "20": { class_type: "LoadImage", inputs: { image: startImg } },
     "21": { class_type: "ImageScale", inputs: { image: ["20", 0], width, height, upscale_method: "lanczos", crop: "center" } },
-    "22": { class_type: "VAEEncode", inputs: { pixels: ["21", 0], vae: ["1", 2] } },
-    "5": { class_type: "EmptyLTXVLatentVideo", inputs: { width, height, length, batch_size: 1 } },
-    "6": { class_type: "LTXVConditioning", inputs: { positive: ["3", 0], negative: ["4", 0], frame_rate: 24 } },
+    "22": { class_type: "LTXVImgToVideo", inputs: { positive: ["3", 0], negative: ["4", 0], vae: ["1", 2], image: ["21", 0], width, height, length, batch_size: 1, strength: 1.0 } },
     "7": { class_type: "LTXVScheduler", inputs: { steps: 8, max_shift: 2.05, base_shift: 0.95, stretch: true, terminal: 0.1 } },
     "8": { class_type: "KSamplerSelect", inputs: { sampler_name: "euler" } },
     "9": {
       class_type: "SamplerCustom",
       inputs: {
-        model: ["1", 0], positive: ["6", 0], negative: ["6", 1],
-        sampler: ["8", 0], sigmas: ["7", 0], latent_image: ["5", 0],
+        model: ["1", 0], positive: ["22", 0], negative: ["22", 1],
+        sampler: ["8", 0], sigmas: ["7", 0], latent_image: ["22", 2],
         add_noise: true, noise_seed: seed, cfg: 1.0,
       },
     },
@@ -856,7 +856,8 @@ function buildLtx2_3StartEnd(prompt: string, width: number, height: number, leng
 }
 
 function buildLtx2_3StartEndFull(prompt: string, width: number, height: number, length: number, seed: number, startImg: string, endImg: string | null): any {
-  // 满血 22B fp8 + gemma + distilled lora + 首尾双图流
+  // 满血 22B fp8 + gemma + distilled lora + 首帧图生视频
+  // 2026-08-14 修复: 原实现 VAEEncode 输出无下游引用(假 i2v), 改为 LTXVImgToVideo 真 i2v
   return {
     "1": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors" } },
     "2": { class_type: "LTXAVTextEncoderLoader", inputs: { text_encoder: "gemma_3_12B_it_fpmixed.safetensors", ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors", device: "default" } },
@@ -865,16 +866,14 @@ function buildLtx2_3StartEndFull(prompt: string, width: number, height: number, 
     "30": { class_type: "LoraLoaderModelOnly", inputs: { model: ["1", 0], lora_name: "ltx-2.3-22b-distilled-lora-384.safetensors", strength_model: 0.5 } },
     "20": { class_type: "LoadImage", inputs: { image: startImg } },
     "21": { class_type: "ImageScale", inputs: { image: ["20", 0], width, height, upscale_method: "lanczos", crop: "center" } },
-    "22": { class_type: "VAEEncode", inputs: { pixels: ["21", 0], vae: ["1", 2] } },
-    "5": { class_type: "EmptyLTXVLatentVideo", inputs: { width, height, length, batch_size: 1 } },
-    "6": { class_type: "LTXVConditioning", inputs: { positive: ["3", 0], negative: ["4", 0], frame_rate: 24 } },
+    "22": { class_type: "LTXVImgToVideo", inputs: { positive: ["3", 0], negative: ["4", 0], vae: ["1", 2], image: ["21", 0], width, height, length, batch_size: 1, strength: 1.0 } },
     "7": { class_type: "LTXVScheduler", inputs: { steps: 8, max_shift: 2.05, base_shift: 0.95, stretch: true, terminal: 0.1 } },
     "8": { class_type: "KSamplerSelect", inputs: { sampler_name: "euler" } },
     "9": {
       class_type: "SamplerCustom",
       inputs: {
-        model: ["30", 0], positive: ["6", 0], negative: ["6", 1],
-        sampler: ["8", 0], sigmas: ["7", 0], latent_image: ["5", 0],
+        model: ["30", 0], positive: ["22", 0], negative: ["22", 1],
+        sampler: ["8", 0], sigmas: ["7", 0], latent_image: ["22", 2],
         add_noise: true, noise_seed: seed, cfg: 1.0,
       },
     },
@@ -884,7 +883,8 @@ function buildLtx2_3StartEndFull(prompt: string, width: number, height: number, 
 }
 
 function buildLtx2_3Repair(prompt: string, width: number, height: number, length: number, seed: number, refImage: string): any {
-  // 简化为 LTX i2v(SeedVR2 修复节点复杂,简化为 LTX 图生视频)
+  // LTX 22B fp8 图生视频(修复/重生片段)
+  // 2026-08-14 修复: 原实现首帧图从未进入 latent(假 i2v), 改为 LTXVImgToVideo 真 i2v
   return {
     "1": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors" } },
     "2": { class_type: "LTXAVTextEncoderLoader", inputs: { text_encoder: "gemma_3_12B_it_fpmixed.safetensors", ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors", device: "default" } },
@@ -892,15 +892,14 @@ function buildLtx2_3Repair(prompt: string, width: number, height: number, length
     "4": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: NEGATIVE_VIDEO } },
     "20": { class_type: "LoadImage", inputs: { image: refImage } },
     "21": { class_type: "ImageScale", inputs: { image: ["20", 0], width, height, upscale_method: "lanczos", crop: "center" } },
-    "5": { class_type: "EmptyLTXVLatentVideo", inputs: { width, height, length, batch_size: 1 } },
-    "6": { class_type: "LTXVConditioning", inputs: { positive: ["3", 0], negative: ["4", 0], frame_rate: 24 } },
+    "22": { class_type: "LTXVImgToVideo", inputs: { positive: ["3", 0], negative: ["4", 0], vae: ["1", 2], image: ["21", 0], width, height, length, batch_size: 1, strength: 1.0 } },
     "7": { class_type: "LTXVScheduler", inputs: { steps: 20, max_shift: 2.05, base_shift: 0.95, stretch: true, terminal: 0.1 } },
     "8": { class_type: "KSamplerSelect", inputs: { sampler_name: "euler" } },
     "9": {
       class_type: "SamplerCustom",
       inputs: {
-        model: ["1", 0], positive: ["6", 0], negative: ["6", 1],
-        sampler: ["8", 0], sigmas: ["7", 0], latent_image: ["5", 0],
+        model: ["1", 0], positive: ["22", 0], negative: ["22", 1],
+        sampler: ["8", 0], sigmas: ["7", 0], latent_image: ["22", 2],
         add_noise: true, noise_seed: seed, cfg: 3.0,
       },
     },
