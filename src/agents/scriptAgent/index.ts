@@ -121,6 +121,14 @@ function createSubAgent(parentCtx: AgentContext) {
 
     const fullResponse = await consumeFullStream(fullStream, subMsg);
 
+    // ★ 关键修复: 自动 parse LLM 输出的 XML 标签并落库
+    // 之前: sub-agent 输出 <storySkeleton>...</storySkeleton> 等 XML 后,
+    //       没有任何代码把这些数据写到 o_agentWorkData, 导致监督层 get_planData() 永远拿到空.
+    // 现在: runAgent 收完 LLM stream 后立刻正则匹配, 写到对应 DB 表/字段.
+    if (fullResponse.trim()) {
+      await autoPersistSubAgentOutput(resTool.data.projectId, fullResponse);
+    }
+
     if (fullResponse.trim()) {
       await memory.add(memoryKey, removeAllXmlTags(fullResponse), {
         name,
@@ -315,4 +323,67 @@ function removeAllXmlTags(text: string): string {
   text = text.replace(/<([a-zA-Z][\w-]*)(\s+[^>]*)?\/>/g, "");
   text = text.replace(/<\/?[a-zA-Z][\w-]*(\s+[^>]*)?>/g, "");
   return text.trim();
+}
+
+/**
+ * ★ 关键修复 (2026-08-13 主人反馈):
+ * 之前 sub-agent 输出的 <storySkeleton> <adaptationStrategy> <scriptItem> XML 飘在 LLM 文本流里,
+ * 没有任何代码把数据真的写到 o_agentWorkData / o_script, 监督层 get_planData() 永远拿到空.
+ * 现在 runAgent 收完 stream 后自动正则匹配 + 直接写库, 不再依赖 client reverse emit.
+ */
+async function autoPersistSubAgentOutput(projectId: number, text: string): Promise<void> {
+  const saved: string[] = [];
+  try {
+    // 1. <storySkeleton>...</storySkeleton> -> o_agentWorkData.scriptAgent.storySkeleton
+    const skMatch = text.match(/<storySkeleton>([\s\S]*?)<\/storySkeleton>/);
+    if (skMatch) {
+      await upsertAgentWorkData(projectId, "scriptAgent", "storySkeleton", skMatch[1].trim());
+      saved.push(`storySkeleton(${skMatch[1].trim().length})`);
+    }
+
+    // 2. <adaptationStrategy>...</adaptationStrategy> -> o_agentWorkData.scriptAgent.adaptationStrategy
+    const asMatch = text.match(/<adaptationStrategy>([\s\S]*?)<\/adaptationStrategy>/);
+    if (asMatch) {
+      await upsertAgentWorkData(projectId, "scriptAgent", "adaptationStrategy", asMatch[1].trim());
+      saved.push(`adaptationStrategy(${asMatch[1].trim().length})`);
+    }
+
+    // 3. <scriptItem name="...">...</scriptItem> -> o_script
+    const siRegex = /<scriptItem\s+name="([^"]+)">([\s\S]*?)<\/scriptItem>/g;
+    let siMatch: RegExpExecArray | null;
+    let siCount = 0;
+    while ((siMatch = siRegex.exec(text)) !== null) {
+      const name = siMatch[1];
+      const content = siMatch[2];
+      const existing = await u.db("o_script").where({ projectId, name }).first();
+      if (existing) {
+        await u.db("o_script").where({ id: existing.id }).update({ content });
+      } else {
+        await u.db("o_script").insert({ projectId, name, content });
+      }
+      siCount++;
+    }
+    if (siCount) saved.push(`scriptItem×${siCount}`);
+
+    if (saved.length) {
+      console.info(`[scriptAgent autoPersist] project=${projectId} saved: ${saved.join(", ")}`);
+    }
+  } catch (e) {
+    console.error("[scriptAgent autoPersist] error:", e);
+  }
+}
+
+/** 合并写入 o_agentWorkData (按 projectId+key 找到行, 解析 data JSON, 覆盖指定字段) */
+async function upsertAgentWorkData(projectId: number, key: string, field: string, value: any): Promise<void> {
+  const row: any = await u.db("o_agentWorkData").where({ projectId, key }).first();
+  let data: any = {};
+  if (row && row.data) {
+    try { data = JSON.parse(row.data); } catch {}
+  }
+  data[field] = value;
+  if (row) {
+    await u.db("o_agentWorkData").where({ id: row.id }).update({ data: JSON.stringify(data) });
+  } else {
+    await u.db("o_agentWorkData").insert({ projectId, key, data: JSON.stringify(data) });
+  }
 }

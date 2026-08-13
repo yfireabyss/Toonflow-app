@@ -98,8 +98,57 @@ export default (toolCpnfig: ToolConfig) => {
       execute: async ({ key }) => {
         const thinking = msg.thinking(`正在获取${flowDataKeyLabels[key]}工作区数据...`);
 
-        const flowData: FlowData = await new Promise((resolve) => socket.emit("getFlowData", { key }, (res: any) => resolve(res)));
-        thinking.appendText(`获取到${flowDataKeyLabels[key]}:\n` + JSON.stringify(flowData[key], null, 2));
+        // 直接读 o_agentWorkData (key=productionAgent), 不再依赖 client emit.
+        // 这样 sub-agent 自动写库后, 监督层一定能读到, 不再因 client 没接 reverse emit 而读空.
+        const { projectId, scriptId } = resTool.data;
+        const row: any = await u
+          .db("o_agentWorkData")
+          .where("projectId", String(projectId))
+          .andWhere("episodesId", String(scriptId))
+          .andWhere("key", "productionAgent")
+          .first();
+
+        // 如果 o_agentWorkData 没有该 scriptId 的行, 直接从 o_storyboard / o_script 现算一次
+        // (用于回退到第一次启动的场景, 比如第一集直接 generate 而没先 saveFlowData)
+        let flowData: any = null;
+        if (row && row.data) {
+          try {
+            flowData = JSON.parse(row.data);
+          } catch (e) {
+            console.error("[tools] get_flowData parse error:", e);
+          }
+        }
+        if (!flowData) {
+          // 现算: 从 o_script 拿脚本, 从 o_storyboard 拿分镜
+          const scriptData = await u.db("o_script").where("projectId", projectId).where("id", scriptId).first();
+          const storyboardData = await u.db("o_storyboard").where("scriptId", scriptId).orderBy("id");
+          const assets2Sb = await u.db("o_assets2Storyboard").whereIn("storyboardId", storyboardData.map((s: any) => s.id)).orderBy("rowid");
+          const map: Record<number, number[]> = {};
+          assets2Sb.forEach((r: any) => {
+            if (!map[r.storyboardId!]) map[r.storyboardId!] = [];
+            map[r.storyboardId!].push(r.assetId!);
+          });
+          flowData = {
+            script: scriptData?.content ?? "",
+            scriptPlan: "",
+            assets: [],
+            storyboardTable: "",
+            storyboard: storyboardData.map((s: any) => ({
+              id: s.id,
+              index: s.index,
+              duration: s.duration ? +s.duration : 0,
+              prompt: s.prompt,
+              associateAssetsIds: map[s.id!] ?? [],
+              src: s.filePath,
+              state: s.state,
+              videoDesc: s.videoDesc,
+              shouldGenerateImage: s.shouldGenerateImage,
+            })),
+            workbench: { videoList: [] },
+          };
+        }
+
+        thinking.appendText(`获取到${flowDataKeyLabels[key]}(len=${JSON.stringify(flowData[key]).length}):\n` + JSON.stringify(flowData[key], null, 2).slice(0, 800));
         thinking.updateTitle(`获取${flowDataKeyLabels[key]}完成`);
         thinking.complete();
         if (workMap[key] && JSON.stringify(workMap[key]) === JSON.stringify(flowData[key])) {

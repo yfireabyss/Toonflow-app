@@ -68,11 +68,24 @@ export default (toolCpnfig: ToolConfig) => {
       execute: async ({ key }) => {
         console.log("[tools] get_planData", key);
         const thinking = msg.thinking(`正在获取${planDataKeyLabels[key]}工作区数据...`);
-        const planData: planData = await new Promise((resolve) => socket.emit("getPlanData", { key }, (res: any) => resolve(res)));
-        thinking.appendText(`获取到${planDataKeyLabels[key]}:\n` + planData[key]);
+        // 直接读 o_agentWorkData, 不再依赖 client emit.
+        // 这样 sub-agent 写的 <storySkeleton>/<adaptationStrategy>/<scriptItem> 自动落库后,
+        // 监督层通过此工具一定能读到, 不会因为 client 没响应/没接 reverse emit 而读不到空.
+        const row: any = await u.db("o_agentWorkData").where({ projectId: resTool.data.projectId, key: "scriptAgent" }).first();
+        let data: planData = { storySkeleton: "", adaptationStrategy: "", script: "" } as any;
+        if (row && row.data) {
+          try {
+            const parsed = JSON.parse(row.data);
+            data = { ...data, ...parsed };
+          } catch (e) {
+            console.error("[tools] get_planData parse error:", e);
+          }
+        }
+        const value = (data as any)[key] ?? "";
+        thinking.appendText(`获取到${planDataKeyLabels[key]}(len=${String(value).length}):\n` + (typeof value === "string" ? value.slice(0, 500) : JSON.stringify(value).slice(0, 500)));
         thinking.updateTitle(`获取${planDataKeyLabels[key]}完成`);
         thinking.complete();
-        return planData[key] ?? "无数据";
+        return value || "无数据";
       },
     }),
     get_novel_text: tool({

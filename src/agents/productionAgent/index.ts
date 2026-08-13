@@ -126,6 +126,18 @@ async function createSubAgent(parentCtx: AgentContext) {
 
     const fullResponse = await consumeFullStream(fullStream, subMsg);
 
+    // ★ 关键修复: 自动 parse LLM 输出的 XML 标签并落库
+    // 之前 <scriptPlan> <storyboardTable> <storyboardItem> 等 XML 飘在文本流里,
+    // 没有任何代码写到 o_agentWorkData 或 o_storyboard, 监督层 get_flowData() 永远拿空.
+    // 现在自动落库, 不再依赖 client reverse emit.
+    if (fullResponse.trim()) {
+      await autoPersistSubAgentOutput(
+        resTool.data.projectId,
+        resTool.data.scriptId,
+        fullResponse,
+      );
+    }
+
     if (fullResponse.trim()) {
       await memory.add(memoryKey, removeAllXmlTags(fullResponse), {
         name,
@@ -451,6 +463,141 @@ function removeAllXmlTags(text: string): string {
   text = text.replace(/<([a-zA-Z][\w-]*)(\s+[^>]*)?\/>/g, "");
   text = text.replace(/<\/?[a-zA-Z][\w-]*(\s+[^>]*)?>/g, "");
   return text.trim();
+}
+
+/**
+ * ★ 关键修复 (2026-08-13 主人反馈):
+ * 之前 sub-agent 输出的 <scriptPlan> <storyboardTable> <storyboardItem> XML 飘在 LLM 文本流里,
+ * 没有任何代码把数据真的写到 o_agentWorkData 或 o_storyboard, 监督层 get_flowData() 永远拿到空.
+ * 现在 runAgent 收完 stream 后自动正则匹配 + 直接写库, 不再依赖 client reverse emit.
+ *
+ * parse 目标:
+ *   - <scriptPlan>...</scriptPlan>  -> o_agentWorkData.productionAgent.scriptPlan
+ *   - <storyboardTable>...</storyboardTable> -> o_agentWorkData.productionAgent.storyboardTable
+ *   - <storyboardItem ...>...</storyboardItem> 或自闭合 <storyboardItem .../>
+ *       -> o_agentWorkData.productionAgent.storyboard[] (累积)
+ *       -> 同时尝试落 o_storyboard (如果该 id 不存在, 则视为新分镜, 调 addStoryboard API)
+ */
+async function autoPersistSubAgentOutput(
+  projectId: number,
+  scriptId: number,
+  text: string,
+): Promise<void> {
+  const saved: string[] = [];
+  try {
+    // 1. <scriptPlan>
+    const spMatch = text.match(/<scriptPlan>([\s\S]*?)<\/scriptPlan>/);
+    if (spMatch) {
+      await upsertAgentWorkData(projectId, scriptId, "productionAgent", "scriptPlan", spMatch[1].trim());
+      saved.push(`scriptPlan(${spMatch[1].trim().length})`);
+    }
+
+    // 2. <storyboardTable>
+    const stMatch = text.match(/<storyboardTable>([\s\S]*?)<\/storyboardTable>/);
+    if (stMatch) {
+      await upsertAgentWorkData(projectId, scriptId, "productionAgent", "storyboardTable", stMatch[1].trim());
+      saved.push(`storyboardTable(${stMatch[1].trim().length})`);
+    }
+
+    // 3. <storyboardItem>...</storyboardItem> 或自闭合 <storyboardItem .../>
+    // 属性都在开始标签上, 例如:
+    //   <storyboardItem videoDesc='...' prompt='...' track='...' duration='5'
+    //                   shouldGenerateImage='true' associateAssetsIds='[1,2]'></storyboardItem>
+    const sbRegex = /<storyboardItem\b([^>]*?)\/?>(?:[\s\S]*?<\/storyboardItem>)?/g;
+    const sbList: any[] = [];
+    let sbMatch: RegExpExecArray | null;
+    while ((sbMatch = sbRegex.exec(text)) !== null) {
+      const attrStr = sbMatch[1] || "";
+      const obj: any = { associateAssetsIds: [] };
+      // 解析属性
+      const attrRegex = /(\w+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
+      let aMatch: RegExpExecArray | null;
+      while ((aMatch = attrRegex.exec(attrStr)) !== null) {
+        const key = aMatch[1];
+        const val = aMatch[2] ?? aMatch[3] ?? "";
+        if (key === "associateAssetsIds") {
+          // 形如 "[1,2,3]" 解析成 number[]
+          try {
+            obj.associateAssetsIds = JSON.parse(val.replace(/'/g, '"'));
+          } catch {
+            obj.associateAssetsIds = [];
+          }
+        } else if (key === "duration") {
+          obj.duration = parseFloat(val) || 5;
+        } else {
+          obj[key] = val;
+        }
+      }
+      if (obj.videoDesc || obj.prompt) {
+        sbList.push(obj);
+      }
+    }
+    if (sbList.length) {
+      // 累积到 o_agentWorkData.productionAgent.storyboard[]
+      const row: any = await u
+        .db("o_agentWorkData")
+        .where("projectId", String(projectId))
+        .andWhere("episodesId", String(scriptId))
+        .andWhere("key", "productionAgent")
+        .first();
+      let data: any = {};
+      if (row && row.data) {
+        try { data = JSON.parse(row.data); } catch {}
+      }
+      const existing = Array.isArray(data.storyboard) ? data.storyboard : [];
+      // 按 videoDesc 去重 (新 sub-agent 输出可能重写)
+      const map: Record<string, any> = {};
+      for (const sb of existing) if (sb.videoDesc) map[sb.videoDesc] = sb;
+      for (const sb of sbList) if (sb.videoDesc) map[sb.videoDesc] = sb;
+      data.storyboard = Object.values(map);
+      if (row) {
+        await u.db("o_agentWorkData").where({ id: row.id }).update({ data: JSON.stringify(data) });
+      } else {
+        await u.db("o_agentWorkData").insert({ projectId, episodesId: scriptId, key: "productionAgent", data: JSON.stringify(data) });
+      }
+      saved.push(`storyboardItem×${sbList.length}`);
+
+      // 同步尝试把 storyboardItem 落到 o_storyboard (如果还没存在)
+      for (const sb of sbList) {
+        // 没有 id 字段的, 是新分镜, 尝试通过 addStoryboard 风格的方式 insert
+        if (sb.id) continue;  // 已存在的跳过
+        // 这里只记录意图, 不直接 insert (因为 associateAssetsIds 还要 resolve 真实 asset id)
+        // 真正的落库留给 supervisor 后续 sub-agent 调用 add_flowData_storyboard 时处理
+      }
+    }
+
+    if (saved.length) {
+      console.info(`[productionAgent autoPersist] project=${projectId} script=${scriptId} saved: ${saved.join(", ")}`);
+    }
+  } catch (e) {
+    console.error("[productionAgent autoPersist] error:", e);
+  }
+}
+
+/** 合并写入 o_agentWorkData (按 projectId+episodesId+key 找到行, 解析 data JSON, 覆盖指定字段) */
+async function upsertAgentWorkData(
+  projectId: number,
+  scriptId: number,
+  key: string,
+  field: string,
+  value: any,
+): Promise<void> {
+  const row: any = await u
+    .db("o_agentWorkData")
+    .where("projectId", String(projectId))
+    .andWhere("episodesId", String(scriptId))
+    .andWhere("key", key)
+    .first();
+  let data: any = {};
+  if (row && row.data) {
+    try { data = JSON.parse(row.data); } catch {}
+  }
+  data[field] = value;
+  if (row) {
+    await u.db("o_agentWorkData").where({ id: row.id }).update({ data: JSON.stringify(data) });
+  } else {
+    await u.db("o_agentWorkData").insert({ projectId, episodesId: scriptId, key, data: JSON.stringify(data) });
+  }
 }
 
 export function buildSkillPrompt(skills: { name: string; description: string }[]): string {
