@@ -145,7 +145,15 @@ function createSubAgent(parentCtx: AgentContext) {
       const skill = path.join(u.getPath("skills"), "script_execution_skeleton.md");
       const systemPrompt = await fs.promises.readFile(skill, "utf-8");
 
-      const formatPrompt = "\n你必须使用如下XML格式写入工作区：\n<storySkeleton>故事骨架内容</storySkeleton>";
+      const formatPrompt = `
+## 交付要求
+1. 你必须以如下 XML 格式输出故事骨架（这是工作区的最终交付格式）：
+<storySkeleton>故事骨架内容</storySkeleton>
+
+2. 你不需要也**不要**尝试调用任何写入工具——上层流水线会从你的输出里 parse XML 标签并自动写入工作区。你的工作只是按格式输出 XML。
+
+3. **完成判据**：只要你的输出里包含完整且闭合的 <storySkeleton>...</storySkeleton> 标签，就算『写入完成』。不要在 chat 里说『未完成』、『无法写入』、『缺少工具』等消极话术——这些都不是事实，会被上层误判为任务失败。
+`.trim();
 
       return runAgent({
         key: "scriptAgent:storySkeletonAgent",
@@ -165,7 +173,15 @@ function createSubAgent(parentCtx: AgentContext) {
       const skill = path.join(u.getPath("skills"), "script_execution_adaptation.md");
       const systemPrompt = await fs.promises.readFile(skill, "utf-8");
 
-      const formatPrompt = "\n你必须使用如下XML格式写入工作区：\n<adaptationStrategy>改编策略内容</adaptationStrategy>";
+      const formatPrompt = `
+## 交付要求
+1. 你必须以如下 XML 格式输出改编策略（这是工作区的最终交付格式）：
+<adaptationStrategy>改编策略内容</adaptationStrategy>
+
+2. 你不需要也**不要**尝试调用任何写入工具——上层流水线会从你的输出里 parse XML 标签并自动写入工作区。你的工作只是按格式输出 XML。
+
+3. **完成判据**：只要你的输出里包含完整且闭合的 <adaptationStrategy>...</adaptationStrategy> 标签，就算『写入完成』。不要在 chat 里说『未完成』、『无法写入』、『缺少工具』等消极话术——这些都不是事实，会被上层误判为任务失败。
+`.trim();
 
       return runAgent({
         key: "scriptAgent:adaptationStrategyAgent",
@@ -192,7 +208,17 @@ function createSubAgent(parentCtx: AgentContext) {
 
       const novelData = await u.db("o_novel").where("projectId", resTool.data.projectId).select("chapterIndex");
 
-      const formatPrompt = `\n你必须使用如下XML格式写入工作区：\nXML不得添加任何额外标签<scriptItem name="剧本名称">剧本内容</scriptItem><scriptItem name="剧本名称">剧本内容</scriptItem><scriptItem name="剧本名称">剧本内容</scriptItem>`;
+      const formatPrompt = `
+## 交付要求
+1. 你必须以如下 XML 格式输出剧本（这是工作区的最终交付格式，**XML 不得添加任何额外标签**）：
+<scriptItem name="剧本名称">剧本内容</scriptItem>
+<scriptItem name="剧本名称">剧本内容</scriptItem>
+<scriptItem name="剧本名称">剧本内容</scriptItem>
+
+2. 你不需要也**不要**尝试调用任何写入工具——上层流水线会从你的输出里 parse XML 标签并自动写入工作区。你的工作只是按格式输出 XML。
+
+3. **完成判据**：只要你的输出里包含完整且闭合的 <scriptItem name="...">...</scriptItem> 标签，就算『写入完成』。不要在 chat 里说『未完成』、『无法写入』、『缺少工具』等消极话术——这些都不是事实，会被上层误判为任务失败。
+`.trim();
 
       return runAgent({
         key: "scriptAgent:scriptAgent",
