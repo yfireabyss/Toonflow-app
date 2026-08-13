@@ -225197,7 +225197,8 @@ async function pollTask(fn, interval = 3e3, timeout = 3e6) {
       if (result.completed) return result;
       if (result?.error) return result;
     } catch (e) {
-      return { completed: false, error: utils_default.error(e).message || "poll error" };
+      const msg = utils_default.error(e).message || "poll error";
+      console.warn(`[pollTask] transient error (will retry): ${msg}`);
     }
     await new Promise((res) => setTimeout(res, interval));
   }
@@ -240661,9 +240662,9 @@ var init_addStoryboard = __esm({
       }),
       async (req, res) => {
         const { prompt, duration: duration4, state, src, scriptId, projectId, videoDesc, shouldGenerateImage } = req.body;
-        const trackId = Date.now();
+        const trackId2 = Date.now();
         await utils_default.db("o_videoTrack").insert({
-          id: trackId,
+          id: trackId2,
           scriptId,
           projectId
         });
@@ -240672,7 +240673,7 @@ var init_addStoryboard = __esm({
           duration: duration4,
           state,
           filePath: utils_default.replaceUrl(src),
-          trackId,
+          trackId: trackId2,
           videoDesc,
           shouldGenerateImage: src ? 1 : 0,
           scriptId,
@@ -240751,10 +240752,10 @@ var init_batchAddStoryboardInfo = __esm({
           const storyboardIds = storyboardGroupByTrack[track] ?? [];
           const trackDuration = lastStoryboard.filter((item) => item.track == track).reduce((sum, item) => sum + Number(item.duration), 0);
           const existingStoryboard = await utils_default.db("o_storyboard").where({ scriptId, track }).whereNotNull("trackId").first();
-          let trackId;
+          let trackId2;
           if (existingStoryboard?.trackId) {
-            trackId = existingStoryboard.trackId;
-            await utils_default.db("o_videoTrack").where("id", trackId).update({ duration: trackDuration });
+            trackId2 = existingStoryboard.trackId;
+            await utils_default.db("o_videoTrack").where("id", trackId2).update({ duration: trackDuration });
           } else {
             const newTrackId = Date.now();
             await utils_default.db("o_videoTrack").insert({
@@ -240763,9 +240764,9 @@ var init_batchAddStoryboardInfo = __esm({
               projectId,
               duration: trackDuration
             });
-            trackId = newTrackId;
+            trackId2 = newTrackId;
           }
-          await utils_default.db("o_storyboard").whereIn("id", storyboardIds).update({ trackId });
+          await utils_default.db("o_storyboard").whereIn("id", storyboardIds).update({ trackId: trackId2 });
         }
         const storyboardData = await Promise.all(
           lastStoryboard.map(async (i) => {
@@ -241365,14 +241366,14 @@ var init_addTrack = __esm({
         const data = await utils_default.db("o_project").where("id", projectId).first();
         const video = data?.videoModel?.split(":");
         const vemdor = await utils_default.vendor.getModelList(video?.[0]);
-        const trackId = Date.now();
+        const trackId2 = Date.now();
         await utils_default.db("o_videoTrack").insert({
-          id: trackId,
+          id: trackId2,
           projectId,
           scriptId,
           duration: duration4
         });
-        res.status(200).send(success3(trackId));
+        res.status(200).send(success3(trackId2));
       }
     );
   }
@@ -241470,12 +241471,17 @@ var init_batchGeneratePrompt = __esm({
               const images = await Promise.all(
                 track.info.map(async (item) => {
                   if (item.sources === "storyboard") {
-                    const storyboard2 = await utils_default.db("o_storyboard").where("o_storyboard.id", item.id).select("videoDesc", "prompt", "track", "duration", "shouldGenerateImage").first();
+                    const storyboard2 = await utils_default.db("o_storyboard").where("o_storyboard.id", item.id).select("videoDesc", "prompt", "track", "duration", "shouldGenerateImage", "index", "scriptId", "projectId").first();
+                    let prevStoryboards = [];
+                    if (storyboard2?.index != null) {
+                      prevStoryboards = await utils_default.db("o_storyboard").where("o_storyboard.projectId", storyboard2.projectId).where("o_storyboard.scriptId", storyboard2.scriptId).where("o_storyboard.index", "<", storyboard2.index).orderBy("o_storyboard.index", "desc").limit(2).select("videoDesc", "index");
+                    }
                     const assetRows = await utils_default.db("o_assets2Storyboard").where("storyboardId", item.id).orderBy("rowid").select("assetId");
                     const associateAssetsIds = assetRows.map((row) => row.assetId);
                     return {
                       ...storyboard2,
                       associateAssetsIds,
+                      prevStoryboards,
                       _type: "storyboard"
                     };
                   }
@@ -241506,12 +241512,22 @@ var init_batchGeneratePrompt = __esm({
                     track: item.track,
                     duration: item.duration,
                     associateAssetsIds: item.associateAssetsIds,
-                    shouldGenerateImage: item.shouldGenerateImage
+                    shouldGenerateImage: item.shouldGenerateImage,
+                    prevStoryboards: item.prevStoryboards
                   });
               }
+              const storyboardContext = storyboard.map((i) => {
+                const prevDesc = (i.prevStoryboards || []).map((p3) => `\u3010\u7B2C${p3.index}\u955C\u3011${p3.videoDesc}`).join("\n");
+                const curDesc = `\u3010\u672C\u955C\u3011${i.videoDesc}`;
+                return prevDesc ? `\u4E0A\u4E00\u955C\u5267\u60C5\uFF1A
+${prevDesc}
+${curDesc}` : curDesc;
+              }).join("\n\n");
               const content = `
           **\u6A21\u578B\u540D\u79F0**\uFF1A${modelData},
           **\u8D44\u4EA7\u4FE1\u606F**\uFF08\u89D2\u8272\u3001\u573A\u666F\u3001\u9053\u5177\u3001\u97F3\u9891):${assets.filter((i) => i.filePath).map((i) => `[${i.id},${i.type},${i.name}]`).join("\uFF0C")},
+          **\u5267\u60C5\u4E0A\u4E0B\u6587**\uFF08\u4E0A\u4E00\u955C\u4E0E\u672C\u955C\u5206\u955C\uFF0C\u7528\u4E8E\u955C\u5934\u95F4\u5267\u60C5\u547C\u5E94\u3001\u52A8\u4F5C\u627F\u63A5\uFF09\uFF1A
+${storyboardContext}
           **\u5206\u955C\u4FE1\u606F**\uFF1A${storyboard.map(
                 (i) => `<storyboardItem
   videoDesc='${i.videoDesc}'
@@ -241601,7 +241617,7 @@ var init_batchGenerateVideo = __esm({
         const ratio = await utils_default.db("o_project").select("videoRatio").where("id", projectId).first();
         const tasks = await Promise.all(
           trackData.map(async (track) => {
-            const { uploadData, trackId, prompt, duration: duration4 } = track;
+            const { uploadData, trackId: trackId2, prompt, duration: duration4 } = track;
             const images = await Promise.all(
               uploadData.map(async (item) => {
                 if (item.sources === "storyboard") {
@@ -241621,9 +241637,9 @@ var init_batchGenerateVideo = __esm({
               state: "\u751F\u6210\u4E2D",
               scriptId,
               projectId,
-              videoTrackId: trackId
+              videoTrackId: trackId2
             });
-            return { videoId, videoPath, prompt, duration: duration4, images, trackId };
+            return { videoId, videoPath, prompt, duration: duration4, images, trackId: trackId2 };
           })
         );
         res.status(200).send(success3(tasks.map((t) => ({ videoId: t.videoId, trackId: t.trackId }))));
@@ -241652,7 +241668,7 @@ var init_batchGenerateVideo = __esm({
               describe: "\u6839\u636E\u63D0\u793A\u8BCD\u751F\u6210\u89C6\u9891",
               relatedObjects: JSON.stringify(relatedObjects)
             }
-          ).then(async () => await aiVideo.save(videoPath)).then(async () => await utils_default.db("o_video").where("id", videoId).update({ state: "\u751F\u6210\u6210\u529F" })).catch(async (error73) => {
+          ).then(async () => await aiVideo.save(videoPath)).then(async () => await utils_default.db("o_video").where("id", videoId).update({ state: "\u751F\u6210\u6210\u529F" })).then(async () => await utils_default.db("o_videoTrack").where("id", trackId).update({ videoId })).catch(async (error73) => {
             await utils_default.db("o_video").where("id", videoId).update({
               state: "\u751F\u6210\u5931\u8D25",
               errorReason: utils_default.error(error73).message
@@ -241815,7 +241831,7 @@ var init_generateVideo = __esm({
         trackId: external_exports.number()
       }),
       async (req, res) => {
-        const { scriptId, projectId, prompt, uploadData, model, duration: duration4, resolution, audio, mode, trackId } = req.body;
+        const { scriptId, projectId, prompt, uploadData, model, duration: duration4, resolution, audio, mode, trackId: trackId2 } = req.body;
         let modeData = [];
         if (Array.isArray(mode)) {
         } else if (typeof mode === "string" && mode.startsWith('["') && mode.endsWith('"]')) {
@@ -241850,7 +241866,7 @@ var init_generateVideo = __esm({
           state: "\u751F\u6210\u4E2D",
           scriptId,
           projectId,
-          videoTrackId: trackId
+          videoTrackId: trackId2
         });
         res.status(200).send(success3(videoId));
         const relatedObjects = {
@@ -241876,7 +241892,7 @@ var init_generateVideo = __esm({
             describe: "\u6839\u636E\u63D0\u793A\u8BCD\u751F\u6210\u89C6\u9891",
             relatedObjects: JSON.stringify(relatedObjects)
           }
-        ).then(async () => await aiVideo.save(videoPath)).then(async () => await utils_default.db("o_video").where("id", videoId).update({ state: "\u751F\u6210\u6210\u529F" })).catch(async (error73) => {
+        ).then(async () => await aiVideo.save(videoPath)).then(async () => await utils_default.db("o_video").where("id", videoId).update({ state: "\u751F\u6210\u6210\u529F" })).then(async () => await utils_default.db("o_videoTrack").where("id", trackId2).update({ videoId })).catch(async (error73) => {
           await utils_default.db("o_video").where("id", videoId).update({
             state: "\u751F\u6210\u5931\u8D25",
             errorReason: utils_default.error(error73).message
@@ -241915,19 +241931,24 @@ var init_generateVideoPrompt = __esm({
         mode: external_exports.string()
       }),
       async (req, res) => {
-        const { trackId, projectId, info, model, mode } = req.body;
-        await utils_default.db("o_videoTrack").where({ id: trackId }).update({
+        const { trackId: trackId2, projectId, info, model, mode } = req.body;
+        await utils_default.db("o_videoTrack").where({ id: trackId2 }).update({
           state: "\u751F\u6210\u4E2D"
         });
         const images = await Promise.all(
           info.map(async (item) => {
             if (item.sources === "storyboard") {
-              const storyboard2 = await utils_default.db("o_storyboard").where("o_storyboard.id", item.id).select("videoDesc", "prompt", "track", "duration", "shouldGenerateImage").first();
+              const storyboard2 = await utils_default.db("o_storyboard").where("o_storyboard.id", item.id).select("videoDesc", "prompt", "track", "duration", "shouldGenerateImage", "index", "scriptId", "projectId").first();
+              let prevStoryboards = [];
+              if (storyboard2?.index != null) {
+                prevStoryboards = await utils_default.db("o_storyboard").where("o_storyboard.projectId", storyboard2.projectId).where("o_storyboard.scriptId", storyboard2.scriptId).where("o_storyboard.index", "<", storyboard2.index).orderBy("o_storyboard.index", "desc").limit(2).select("videoDesc", "index");
+              }
               const assetRows = await utils_default.db("o_assets2Storyboard").where("storyboardId", item.id).orderBy("rowid").select("assetId");
               const associateAssetsIds = assetRows.map((row) => row.assetId);
               return {
                 ...storyboard2,
                 associateAssetsIds,
+                prevStoryboards,
                 _type: "storyboard"
                 // 标记类型，便于后续区分
               };
@@ -242014,10 +242035,19 @@ var init_generateVideoPrompt = __esm({
         }
         const artStyle = projectData?.artStyle || "\u65E0";
         const visualManual = utils_default.getArtPrompt(artStyle, "art_skills", "art_storyboard_video");
+        const storyboardContext = storyboard.map((i) => {
+          const prevDesc = (i.prevStoryboards || []).map((p3) => `\u3010\u7B2C${p3.index}\u955C\u3011${p3.videoDesc}`).join("\n");
+          const curDesc = `\u3010\u672C\u955C\u3011${i.videoDesc}`;
+          return prevDesc ? `\u4E0A\u4E00\u955C\u5267\u60C5\uFF1A
+${prevDesc}
+${curDesc}` : curDesc;
+        }).join("\n\n");
         const content = `
           **\u6A21\u578B\u540D\u79F0**\uFF1A${modelData},
 
           **\u8D44\u4EA7\u4FE1\u606F**\uFF08\u89D2\u8272\u3001\u573A\u666F\u3001\u9053\u5177\u3001\u97F3\u9891):${assets.filter((i) => i.filePath).map((i) => `[${i.id},${i.type},${i.name} ${assetsAudioRecord[i.id] ? `audio:${assetsAudioRecord[i.id]}` : ""} ] `).join("\uFF0C")},
+          **\u5267\u60C5\u4E0A\u4E0B\u6587**\uFF08\u4E0A\u4E00\u955C\u4E0E\u672C\u955C\u5206\u955C\uFF0C\u7528\u4E8E\u955C\u5934\u95F4\u5267\u60C5\u547C\u5E94\u3001\u52A8\u4F5C\u627F\u63A5\uFF09\uFF1A
+${storyboardContext}
           **\u5206\u955C\u4FE1\u606F**\uFF1A${storyboard.map(
           (i) => `<storyboardItem
   videoDesc='${i.videoDesc}'
@@ -242039,13 +242069,13 @@ var init_generateVideoPrompt = __esm({
               }
             ]
           });
-          await utils_default.db("o_videoTrack").where({ id: trackId }).update({
+          await utils_default.db("o_videoTrack").where({ id: trackId2 }).update({
             state: "\u5DF2\u5B8C\u6210",
             prompt: text2
           });
           res.status(200).send(success3(text2));
         } catch (e) {
-          await utils_default.db("o_videoTrack").where({ id: trackId }).update({
+          await utils_default.db("o_videoTrack").where({ id: trackId2 }).update({
             state: "\u751F\u6210\u5931\u8D25",
             reason: utils_default.error(e).message
           });
@@ -242267,17 +242297,17 @@ var init_getGenerateData = __esm({
         );
         const trackList = [];
         const trackIdMap = [...new Set(trackData.map((t) => t.id))];
-        for (const trackId of trackIdMap) {
-          const item = trackData.find((t) => t.id === trackId);
+        for (const trackId2 of trackIdMap) {
+          const item = trackData.find((t) => t.id === trackId2);
           trackList.push({
-            id: trackId,
+            id: trackId2,
             duration: item?.duration ?? 0,
             prompt: item?.prompt || "",
             state: item?.state ?? "\u672A\u751F\u6210",
             reason: item?.reason ?? "",
             selectVideoId: Number(item?.videoId),
             medias: (() => {
-              const storyboardMedias = storyboardTrackRecord[trackId] ?? [];
+              const storyboardMedias = storyboardTrackRecord[trackId2] ?? [];
               const assetMedias = storyboardMedias.flatMap((s) => otherDataMap[s.id] ?? []);
               const seenAssetIds = /* @__PURE__ */ new Set();
               const uniqueAssets = assetMedias.filter((a) => {
@@ -242298,10 +242328,10 @@ var init_getGenerateData = __esm({
               return [...hasImageAssetData, ...storyboardMedias, ...notHasImageAssetData];
             })(),
             videoList: await Promise.all(
-              videoList.filter((v) => v.videoTrackId === trackId).map(async (v) => ({
+              videoList.filter((v) => v.videoTrackId === trackId2).map(async (v) => ({
                 id: v.id,
                 src: v.filePath ? await utils_default.oss.getFileUrl(v.filePath) : "",
-                state: v.state === "\u5DF2\u5B8C\u6210" ? "\u5DF2\u5B8C\u6210" : v.state === "\u751F\u6210\u4E2D" ? "\u751F\u6210\u4E2D" : v.state === "\u751F\u6210\u5931\u8D25" ? "\u751F\u6210\u5931\u8D25" : "\u672A\u751F\u6210",
+                state: v.state === "\u5DF2\u5B8C\u6210" || v.state === "\u751F\u6210\u6210\u529F" ? "\u5DF2\u5B8C\u6210" : v.state === "\u751F\u6210\u4E2D" ? "\u751F\u6210\u4E2D" : v.state === "\u751F\u6210\u5931\u8D25" ? "\u751F\u6210\u5931\u8D25" : "\u672A\u751F\u6210",
                 errorReason: v?.errorReason ?? ""
               }))
             )
@@ -242380,8 +242410,8 @@ var init_selectVideo = __esm({
         videoId: external_exports.number()
       }),
       async (req, res) => {
-        const { trackId, videoId } = req.body;
-        await utils_default.db("o_videoTrack").where("id", trackId).update({
+        const { trackId: trackId2, videoId } = req.body;
+        await utils_default.db("o_videoTrack").where("id", trackId2).update({
           videoId
         });
         res.status(200).send(success3({ message: "\u89C6\u9891\u9009\u62E9\u6210\u529F" }));
@@ -258522,7 +258552,15 @@ function createSubAgent2(parentCtx) {
     execute: async ({ prompt }) => {
       const skill = import_path11.default.join(utils_default.getPath("skills"), "script_execution_skeleton.md");
       const systemPrompt = await fs12.promises.readFile(skill, "utf-8");
-      const formatPrompt = "\n\u4F60\u5FC5\u987B\u4F7F\u7528\u5982\u4E0BXML\u683C\u5F0F\u5199\u5165\u5DE5\u4F5C\u533A\uFF1A\n<storySkeleton>\u6545\u4E8B\u9AA8\u67B6\u5185\u5BB9</storySkeleton>";
+      const formatPrompt = `
+## \u4EA4\u4ED8\u8981\u6C42
+1. \u4F60\u5FC5\u987B\u4EE5\u5982\u4E0B XML \u683C\u5F0F\u8F93\u51FA\u6545\u4E8B\u9AA8\u67B6\uFF08\u8FD9\u662F\u5DE5\u4F5C\u533A\u7684\u6700\u7EC8\u4EA4\u4ED8\u683C\u5F0F\uFF09\uFF1A
+<storySkeleton>\u6545\u4E8B\u9AA8\u67B6\u5185\u5BB9</storySkeleton>
+
+2. \u4F60\u4E0D\u9700\u8981\u4E5F**\u4E0D\u8981**\u5C1D\u8BD5\u8C03\u7528\u4EFB\u4F55\u5199\u5165\u5DE5\u5177\u2014\u2014\u4E0A\u5C42\u6D41\u6C34\u7EBF\u4F1A\u4ECE\u4F60\u7684\u8F93\u51FA\u91CC parse XML \u6807\u7B7E\u5E76\u81EA\u52A8\u5199\u5165\u5DE5\u4F5C\u533A\u3002\u4F60\u7684\u5DE5\u4F5C\u53EA\u662F\u6309\u683C\u5F0F\u8F93\u51FA XML\u3002
+
+3. **\u5B8C\u6210\u5224\u636E**\uFF1A\u53EA\u8981\u4F60\u7684\u8F93\u51FA\u91CC\u5305\u542B\u5B8C\u6574\u4E14\u95ED\u5408\u7684 <storySkeleton>...</storySkeleton> \u6807\u7B7E\uFF0C\u5C31\u7B97\u300E\u5199\u5165\u5B8C\u6210\u300F\u3002\u4E0D\u8981\u5728 chat \u91CC\u8BF4\u300E\u672A\u5B8C\u6210\u300F\u3001\u300E\u65E0\u6CD5\u5199\u5165\u300F\u3001\u300E\u7F3A\u5C11\u5DE5\u5177\u300F\u7B49\u6D88\u6781\u8BDD\u672F\u2014\u2014\u8FD9\u4E9B\u90FD\u4E0D\u662F\u4E8B\u5B9E\uFF0C\u4F1A\u88AB\u4E0A\u5C42\u8BEF\u5224\u4E3A\u4EFB\u52A1\u5931\u8D25\u3002
+`.trim();
       return runAgent({
         key: "scriptAgent:storySkeletonAgent",
         prompt,
@@ -258539,7 +258577,15 @@ function createSubAgent2(parentCtx) {
     execute: async ({ prompt }) => {
       const skill = import_path11.default.join(utils_default.getPath("skills"), "script_execution_adaptation.md");
       const systemPrompt = await fs12.promises.readFile(skill, "utf-8");
-      const formatPrompt = "\n\u4F60\u5FC5\u987B\u4F7F\u7528\u5982\u4E0BXML\u683C\u5F0F\u5199\u5165\u5DE5\u4F5C\u533A\uFF1A\n<adaptationStrategy>\u6539\u7F16\u7B56\u7565\u5185\u5BB9</adaptationStrategy>";
+      const formatPrompt = `
+## \u4EA4\u4ED8\u8981\u6C42
+1. \u4F60\u5FC5\u987B\u4EE5\u5982\u4E0B XML \u683C\u5F0F\u8F93\u51FA\u6539\u7F16\u7B56\u7565\uFF08\u8FD9\u662F\u5DE5\u4F5C\u533A\u7684\u6700\u7EC8\u4EA4\u4ED8\u683C\u5F0F\uFF09\uFF1A
+<adaptationStrategy>\u6539\u7F16\u7B56\u7565\u5185\u5BB9</adaptationStrategy>
+
+2. \u4F60\u4E0D\u9700\u8981\u4E5F**\u4E0D\u8981**\u5C1D\u8BD5\u8C03\u7528\u4EFB\u4F55\u5199\u5165\u5DE5\u5177\u2014\u2014\u4E0A\u5C42\u6D41\u6C34\u7EBF\u4F1A\u4ECE\u4F60\u7684\u8F93\u51FA\u91CC parse XML \u6807\u7B7E\u5E76\u81EA\u52A8\u5199\u5165\u5DE5\u4F5C\u533A\u3002\u4F60\u7684\u5DE5\u4F5C\u53EA\u662F\u6309\u683C\u5F0F\u8F93\u51FA XML\u3002
+
+3. **\u5B8C\u6210\u5224\u636E**\uFF1A\u53EA\u8981\u4F60\u7684\u8F93\u51FA\u91CC\u5305\u542B\u5B8C\u6574\u4E14\u95ED\u5408\u7684 <adaptationStrategy>...</adaptationStrategy> \u6807\u7B7E\uFF0C\u5C31\u7B97\u300E\u5199\u5165\u5B8C\u6210\u300F\u3002\u4E0D\u8981\u5728 chat \u91CC\u8BF4\u300E\u672A\u5B8C\u6210\u300F\u3001\u300E\u65E0\u6CD5\u5199\u5165\u300F\u3001\u300E\u7F3A\u5C11\u5DE5\u5177\u300F\u7B49\u6D88\u6781\u8BDD\u672F\u2014\u2014\u8FD9\u4E9B\u90FD\u4E0D\u662F\u4E8B\u5B9E\uFF0C\u4F1A\u88AB\u4E0A\u5C42\u8BEF\u5224\u4E3A\u4EFB\u52A1\u5931\u8D25\u3002
+`.trim();
       return runAgent({
         key: "scriptAgent:adaptationStrategyAgent",
         prompt,
@@ -258562,8 +258608,16 @@ function createSubAgent2(parentCtx) {
       );
       const novelData = await utils_default.db("o_novel").where("projectId", resTool.data.projectId).select("chapterIndex");
       const formatPrompt = `
-\u4F60\u5FC5\u987B\u4F7F\u7528\u5982\u4E0BXML\u683C\u5F0F\u5199\u5165\u5DE5\u4F5C\u533A\uFF1A
-XML\u4E0D\u5F97\u6DFB\u52A0\u4EFB\u4F55\u989D\u5916\u6807\u7B7E<scriptItem name="\u5267\u672C\u540D\u79F0">\u5267\u672C\u5185\u5BB9</scriptItem><scriptItem name="\u5267\u672C\u540D\u79F0">\u5267\u672C\u5185\u5BB9</scriptItem><scriptItem name="\u5267\u672C\u540D\u79F0">\u5267\u672C\u5185\u5BB9</scriptItem>`;
+## \u4EA4\u4ED8\u8981\u6C42
+1. \u4F60\u5FC5\u987B\u4EE5\u5982\u4E0B XML \u683C\u5F0F\u8F93\u51FA\u5267\u672C\uFF08\u8FD9\u662F\u5DE5\u4F5C\u533A\u7684\u6700\u7EC8\u4EA4\u4ED8\u683C\u5F0F\uFF0C**XML \u4E0D\u5F97\u6DFB\u52A0\u4EFB\u4F55\u989D\u5916\u6807\u7B7E**\uFF09\uFF1A
+<scriptItem name="\u5267\u672C\u540D\u79F0">\u5267\u672C\u5185\u5BB9</scriptItem>
+<scriptItem name="\u5267\u672C\u540D\u79F0">\u5267\u672C\u5185\u5BB9</scriptItem>
+<scriptItem name="\u5267\u672C\u540D\u79F0">\u5267\u672C\u5185\u5BB9</scriptItem>
+
+2. \u4F60\u4E0D\u9700\u8981\u4E5F**\u4E0D\u8981**\u5C1D\u8BD5\u8C03\u7528\u4EFB\u4F55\u5199\u5165\u5DE5\u5177\u2014\u2014\u4E0A\u5C42\u6D41\u6C34\u7EBF\u4F1A\u4ECE\u4F60\u7684\u8F93\u51FA\u91CC parse XML \u6807\u7B7E\u5E76\u81EA\u52A8\u5199\u5165\u5DE5\u4F5C\u533A\u3002\u4F60\u7684\u5DE5\u4F5C\u53EA\u662F\u6309\u683C\u5F0F\u8F93\u51FA XML\u3002
+
+3. **\u5B8C\u6210\u5224\u636E**\uFF1A\u53EA\u8981\u4F60\u7684\u8F93\u51FA\u91CC\u5305\u542B\u5B8C\u6574\u4E14\u95ED\u5408\u7684 <scriptItem name="...">...</scriptItem> \u6807\u7B7E\uFF0C\u5C31\u7B97\u300E\u5199\u5165\u5B8C\u6210\u300F\u3002\u4E0D\u8981\u5728 chat \u91CC\u8BF4\u300E\u672A\u5B8C\u6210\u300F\u3001\u300E\u65E0\u6CD5\u5199\u5165\u300F\u3001\u300E\u7F3A\u5C11\u5DE5\u5177\u300F\u7B49\u6D88\u6781\u8BDD\u672F\u2014\u2014\u8FD9\u4E9B\u90FD\u4E0D\u662F\u4E8B\u5B9E\uFF0C\u4F1A\u88AB\u4E0A\u5C42\u8BEF\u5224\u4E3A\u4EFB\u52A1\u5931\u8D25\u3002
+`.trim();
       return runAgent({
         key: "scriptAgent:scriptAgent",
         prompt,
@@ -258863,7 +258917,7 @@ async function startServe(randomPort = false) {
           sizeSubDir = `${percentMatch[1]}p`;
           sizeOpts = { type: "percentage", value: pct };
         } else {
-          import_express170.default.static(ossDir, { acceptRanges: false })(req, res, next);
+          import_express170.default.static(ossDir, { acceptRanges: true })(req, res, next);
           return;
         }
         const ext = import_path29.default.extname(req.path);
@@ -258874,14 +258928,16 @@ async function startServe(randomPort = false) {
           if (thumbnailPath) {
             res.sendFile(thumbnailPath);
           } else {
-            import_express170.default.static(ossDir, { acceptRanges: false })(req, res, next);
+            import_express170.default.static(ossDir, { acceptRanges: true })(req, res, next);
           }
         });
         return;
       }
       next();
     },
-    import_express170.default.static(ossDir, { acceptRanges: false })
+    // acceptRanges: true 让视频文件支持 Range 请求（webav/MP4Box 等需要 Range 才能解 MP4 moov box）
+    // 之前默认 false 会导致 Range 请求返回 200 全量而非 206 片段，剪辑台 webav 预览黑屏
+    import_express170.default.static(ossDir, { acceptRanges: true })
   );
   const skillsDir = utils_default.getPath("skills");
   if (!import_fs19.default.existsSync(skillsDir)) {

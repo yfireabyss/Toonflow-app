@@ -93,13 +93,19 @@ export async function pollTask(
   timeout = 3000000,
 ): Promise<{ completed: boolean; data?: string; error?: string }> {
   const start = Date.now();
+  // 2026-08-13: fn 抛异常(axios timeout/网络毛刺)不再立即放弃, 视作一次未完成继续轮询
+  // 原因: 之前第一次 axios 失败就直接 return, 任何 vendor(主要是 comfyui)偶发网络抖动
+  //       都会导致概率性失败, 没必要. 真正完成态通过 fn 返回的 {completed:true,error} 表达.
+  //       这里仅打印日志, 让自然 timeout 上限兜底.
   while (Date.now() - start < timeout) {
     try {
       const result = await fn();
       if (result.completed) return result;
       if (result?.error) return result;
     } catch (e: any) {
-      return { completed: false, error: u.error(e).message || "poll error" };
+      const msg = u.error(e).message || "poll error";
+      // 容忍 transient error, 继续轮询; 兜底仍受外层 timeout 限制
+      console.warn(`[pollTask] transient error (will retry): ${msg}`);
     }
     await new Promise((res) => setTimeout(res, interval));
   }
