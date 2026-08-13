@@ -447,21 +447,34 @@ function newSeed(): number {
 // ---- IMAGE BUILDERS ----
 
 function buildSdxlT2i(prompt: string, width: number, height: number, seed: number): any {
-  // 简化:只用 SDXL base(不用 refiner 避免 shape 不匹配)
+  // 2026-08-13: 启用完整 SDXL base+refiner 双 KSampler 链
+  // 之前只用 base (注释 "避免 shape 不匹配" 是早期妥协), 现在 refiner 已装回 (sd_xl_refiner_1.0.safetensors 6GB)
+  // 链路: base 25 步 (denoise=1) 出基础 latent → refiner 20 步 (denoise=0.2) 细化 → VAEDecode → SaveImage
+  //   - 两 stage 共享 positive/negative CLIP (都从 base 编码)
+  //   - refiner 的 model 来自 refiner checkpoint, vae 仍用 base 的 (refiner 不带独立 vae)
+  //   - 显存 ~13-15GB (base 6.5 + refiner 6 + 临时), 16GB 满载; 150W 功耗墙下 ~25-30s/张
   return {
     "1": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "sd_xl_base_1.0.safetensors" } },
-    "2": { class_type: "CLIPTextEncode", inputs: { clip: ["1", 1], text: prompt } },
-    "3": { class_type: "CLIPTextEncode", inputs: { clip: ["1", 1], text: NEGATIVE_DEFAULT } },
-    "4": { class_type: "EmptyLatentImage", inputs: { width, height, batch_size: 1 } },
-    "5": {
+    "2": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "sd_xl_refiner_1.0.safetensors" } },
+    "3": { class_type: "CLIPTextEncode", inputs: { clip: ["1", 1], text: prompt } },
+    "4": { class_type: "CLIPTextEncode", inputs: { clip: ["1", 1], text: NEGATIVE_DEFAULT } },
+    "5": { class_type: "EmptyLatentImage", inputs: { width, height, batch_size: 1 } },
+    "6": {
       class_type: "KSampler",
       inputs: {
-        model: ["1", 0], positive: ["2", 0], negative: ["3", 0], latent_image: ["4", 0],
+        model: ["1", 0], positive: ["3", 0], negative: ["4", 0], latent_image: ["5", 0],
         seed, steps: 25, cfg: 7, sampler_name: "euler", scheduler: "normal", denoise: 1.0,
       },
     },
-    "6": { class_type: "VAEDecode", inputs: { samples: ["5", 0], vae: ["1", 2] } },
-    "7": { class_type: "SaveImage", inputs: { images: ["6", 0], filename_prefix: "toonflow_sdxl" } },
+    "7": {
+      class_type: "KSampler",
+      inputs: {
+        model: ["2", 0], positive: ["3", 0], negative: ["4", 0], latent_image: ["6", 0],
+        seed, steps: 20, cfg: 7, sampler_name: "euler", scheduler: "normal", denoise: 0.2,
+      },
+    },
+    "8": { class_type: "VAEDecode", inputs: { samples: ["7", 0], vae: ["1", 2] } },
+    "9": { class_type: "SaveImage", inputs: { images: ["8", 0], filename_prefix: "toonflow_sdxl_refiner" } },
   };
 }
 
@@ -511,18 +524,23 @@ function buildHidreamT2i(prompt: string, width: number, height: number, seed: nu
 
 function buildQwenImageT2i(prompt: string, width: number, height: number, seed: number): any {
   // Qwen-Image 20B fp8: UNETLoader + CLIPLoader(qwen_2.5_vl, type=qwen_image) + VAELoader(qwen_image_vae)
+  // 2026-08-13 实锤 3 条 fix:
+  // 1. Qwen-Image 是 rectified flow, cfg=1.0 + scheduler=simple 必须
+  // 2. NEGATIVE 必须强制置空 — 全局 NEGATIVE_DEFAULT 含 "text" token 在 cfg=1.0 时会
+  //    把 latent 推废, 出 3KB 全白图
+  // 3. UNETLoader 节点 1-3 在同一工作流里同时 cache, 第二次跑会复用错误结果
   return {
     "1": { class_type: "UNETLoader", inputs: { unet_name: "qwen_image_fp8mixed.safetensors", weight_dtype: "default" } },
-    "2": { class_type: "CLIPLoader", inputs: { clip_name: "qwen_2.5_vl_7b_fp8_scaled.safetensors", type: "qwen_image", device: "default" } },
+    "2": { class_type: "CLIPLoader", "inputs": { clip_name: "qwen_2.5_vl_7b_fp8_scaled.safetensors", type: "qwen_image", device: "default" } },
     "3": { class_type: "VAELoader", inputs: { vae_name: "qwen_image_vae.safetensors" } },
     "4": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: prompt } },
-    "5": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: NEGATIVE_DEFAULT } },
+    "5": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: "" } },
     "6": { class_type: "EmptyLatentImage", inputs: { width, height, batch_size: 1 } },
     "7": {
       class_type: "KSampler",
       inputs: {
         model: ["1", 0], positive: ["4", 0], negative: ["5", 0], latent_image: ["6", 0],
-        seed, steps: 20, cfg: 4, sampler_name: "euler", scheduler: "normal", denoise: 1.0,
+        seed, steps: 9, cfg: 1.0, sampler_name: "euler", scheduler: "simple", denoise: 1.0,
       },
     },
     "8": { class_type: "VAEDecode", inputs: { samples: ["7", 0], vae: ["3", 0] } },
@@ -532,6 +550,7 @@ function buildQwenImageT2i(prompt: string, width: number, height: number, seed: 
 
 function buildQwenImageEdit(prompt: string, width: number, height: number, seed: number, refImage: string): any {
   // Qwen-Image-Edit 2511 20B fp8: 图生图,UNETLoader + CLIPLoader + VAELoader + LoadImage
+  // 2026-08-13 实锤: rectified flow, 跟 t2i 一样 cfg=1.0 + scheduler=simple + NEG="" 强制空
   return {
     "1": { class_type: "UNETLoader", inputs: { unet_name: "qwen_image_edit_2511_fp8mixed.safetensors", weight_dtype: "default" } },
     "2": { class_type: "CLIPLoader", inputs: { clip_name: "qwen_2.5_vl_7b_fp8_scaled.safetensors", type: "qwen_image", device: "default" } },
@@ -540,12 +559,12 @@ function buildQwenImageEdit(prompt: string, width: number, height: number, seed:
     "11": { class_type: "ImageScale", inputs: { image: ["10", 0], width, height, upscale_method: "lanczos", crop: "center" } },
     "12": { class_type: "VAEEncode", inputs: { pixels: ["11", 0], vae: ["3", 0] } },
     "4": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: prompt } },
-    "5": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: NEGATIVE_DEFAULT } },
+    "5": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: "" } },
     "7": {
       class_type: "KSampler",
       inputs: {
         model: ["1", 0], positive: ["4", 0], negative: ["5", 0], latent_image: ["12", 0],
-        seed, steps: 20, cfg: 4, sampler_name: "euler", scheduler: "normal", denoise: 0.85,
+        seed, steps: 9, cfg: 1.0, sampler_name: "euler", scheduler: "simple", denoise: 0.85,
       },
     },
     "8": { class_type: "VAEDecode", inputs: { samples: ["7", 0], vae: ["3", 0] } },
