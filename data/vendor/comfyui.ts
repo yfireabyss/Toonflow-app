@@ -524,13 +524,17 @@ function buildHidreamT2i(prompt: string, width: number, height: number, seed: nu
 
 function buildQwenImageT2i(prompt: string, width: number, height: number, seed: number): any {
   // Qwen-Image 20B fp8: UNETLoader + CLIPLoader(qwen_2.5_vl, type=qwen_image) + VAELoader(qwen_image_vae)
-  // 2026-08-13 实锤 3 条 fix:
-  // 1. Qwen-Image 是 rectified flow, cfg=1.0 + scheduler=simple 必须
-  // 2. NEGATIVE 必须强制置空 — 全局 NEGATIVE_DEFAULT 含 "text" token 在 cfg=1.0 时会
-  //    把 latent 推废, 出 3KB 全白图
-  // 3. UNETLoader 节点 1-3 在同一工作流里同时 cache, 第二次跑会复用错误结果
+  // 2026-08-14 实锤 4 条 fix (按重要性):
+  // 1. [致命] 加 Qwen-Image-Lightning-8steps-V1.0 LoRA (节点 20, strength=1.0)
+  //    — 不加时 71% 概率 mode-collapse 成 2.9KB 纯黑图, 跨 seed 不稳
+  //    — 加了之后 steps=4 即可, 跨 seed 100% 稳定, 单图 8s 出
+  // 2. Qwen-Image 是 rectified flow, cfg=1.0 + scheduler=simple 必须
+  // 3. NEGATIVE 必须强制置空 — 全局 NEGATIVE_DEFAULT 含 "text" token 在 cfg=1.0 时
+  //    会把 latent 推废, 出 3KB 全白图
+  // 4. UNETLoader 节点 1-3 在同一工作流里同时 cache, 第二次跑会复用错误结果
   return {
     "1": { class_type: "UNETLoader", inputs: { unet_name: "qwen_image_fp8mixed.safetensors", weight_dtype: "default" } },
+    "20": { class_type: "LoraLoaderModelOnly", inputs: { model: ["1", 0], lora_name: "Qwen-Image-Lightning-8steps-V1.0.safetensors", strength_model: 1.0 } },
     "2": { class_type: "CLIPLoader", "inputs": { clip_name: "qwen_2.5_vl_7b_fp8_scaled.safetensors", type: "qwen_image", device: "default" } },
     "3": { class_type: "VAELoader", inputs: { vae_name: "qwen_image_vae.safetensors" } },
     "4": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: prompt } },
@@ -539,8 +543,8 @@ function buildQwenImageT2i(prompt: string, width: number, height: number, seed: 
     "7": {
       class_type: "KSampler",
       inputs: {
-        model: ["1", 0], positive: ["4", 0], negative: ["5", 0], latent_image: ["6", 0],
-        seed, steps: 9, cfg: 1.0, sampler_name: "euler", scheduler: "simple", denoise: 1.0,
+        model: ["20", 0], positive: ["4", 0], negative: ["5", 0], latent_image: ["6", 0],
+        seed, steps: 4, cfg: 1.0, sampler_name: "euler", scheduler: "simple", denoise: 1.0,
       },
     },
     "8": { class_type: "VAEDecode", inputs: { samples: ["7", 0], vae: ["3", 0] } },
@@ -916,73 +920,93 @@ const textRequest = (model: TextModel, think: boolean, thinkLevel: 0 | 1 | 2 | 3
 const imageRequest = async (config: ImageConfig, model: ImageModel): Promise<string> => {
   if (!vendor.inputValues.baseUrl) throw new Error("缺少 ComfyUI baseUrl 配置");
   const { w, h } = pickImageDims(config.aspectRatio);
-  const seed = newSeed();
-  let wf: any;
-  let needsRef = false;
 
-  switch (model.modelName) {
-    case "sdxl-t2i":
-      wf = buildSdxlT2i(config.prompt, w, h, seed);
-      break;
-    case "flux2-t2i":
-      wf = buildFlux2T2i(config.prompt, w, h, seed);
-      break;
-    case "hidream-t2i":
-      wf = buildHidreamT2i(config.prompt, w, h, seed);
-      break;
-    case "qwen-image-t2i":
-      wf = buildQwenImageT2i(config.prompt, w, h, seed);
-      break;
-    case "qwen-image-edit":
-      if (!startImg) throw new Error("qwen-image-edit 需要 singleImage");
-      wf = buildQwenImageEdit(config.prompt, w, h, seed, startImg);
-      break;
-    case "z-image-turbo":
-      wf = buildZImage(config.prompt, w, h, seed);
-      break;
-    case "simple-auto-img":
-      wf = buildSimpleAutoImg(config.prompt, w, h, seed);
-      break;
-    case "auto-workflow-img":
-      wf = buildAutoWorkflowImg(config.prompt, w, h, seed);
-      break;
-    case "sd-upscale-img":
-      needsRef = true; break;
-    case "face-detailer":
-      needsRef = true; break;
-    case "portrait-enhance":
-      needsRef = true; break;
-    case "hires-fix":
-      wf = buildHiresFix(config.prompt, w, h, seed);
-      break;
-    case "upscale-usdu":
-      needsRef = true; break;
-    default:
-      throw new Error(`未知 image model: ${model.modelName}`);
-  }
-
-  if (needsRef) {
+  // ---- reference 图片上传（一次性，重试复用同一张 ref）----
+  let refName: string | null = null;
+  if (["sd-upscale-img", "face-detailer", "portrait-enhance", "upscale-usdu", "qwen-image-edit"].includes(model.modelName)) {
     const refs = config.referenceList || [];
-    if (refs.length === 0) {
-      throw new Error(`${model.modelName} 需要 reference 图片，但 Toonflow 未提供`);
-    }
-    const refName = await comfyUploadImage(refs[0].base64, `ref_${Date.now()}.png`);
+    if (refs.length === 0) throw new Error(`${model.modelName} 需要 reference 图片，但 Toonflow 未提供`);
+    refName = await comfyUploadImage(refs[0].base64, `ref_${Date.now()}.png`);
     logger(`reference uploaded: ${refName}`);
-    if (model.modelName === "sd-upscale-img") wf = buildSdUpscale(config.prompt, w, h, seed, refName);
-    else if (model.modelName === "face-detailer") wf = buildFaceDetailer(config.prompt, w, h, seed, refName);
-    else if (model.modelName === "portrait-enhance") wf = buildPortraitEnhance(config.prompt, w, h, seed, refName);
-    else if (model.modelName === "upscale-usdu") wf = buildUpscaleUsdu(config.prompt, w, h, seed, refName);
   }
 
-  const submit = await comfyPost("/prompt", { prompt: wf, client_id: "toonflow-comfyui-v2" });
-  if (!submit.prompt_id) throw new Error(`ComfyUI /prompt 提交失败: ${JSON.stringify(submit)}`);
-  const promptId: string = submit.prompt_id;
-  logger(`image submitted: ${promptId}, model=${model.modelName}, size=${w}x${h}`);
+  // ---- 白图/坏图自动重试 ----
+  // Qwen-Image 20B fp8 在本机 16GB 卡上需 CPU offload，采样偶发 mode-collapse
+  // 出 2-3KB 纯黑图（2026-08-14 实测 25% 概率）。检测输出字节数，太小则换 seed 重试。
+  const retryable = model.modelName.startsWith("qwen-image");
+  const MAX_RETRY = retryable ? 3 : 1;
+  let lastErr: string | null = null;
 
-  const out = await submitAndPoll(promptId, "image", 2000, 600_000);
-  const buf = await comfyDownloadView(out.filename, out.subfolder, out.type);
-  const mime = out.filename.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg";
-  return `data:${mime};base64,${buf.toString("base64")}`;
+  for (let attempt = 0; attempt < MAX_RETRY; attempt++) {
+    const seed = newSeed();
+    let wf: any;
+
+    switch (model.modelName) {
+      case "sdxl-t2i":
+        wf = buildSdxlT2i(config.prompt, w, h, seed);
+        break;
+      case "flux2-t2i":
+        wf = buildFlux2T2i(config.prompt, w, h, seed);
+        break;
+      case "hidream-t2i":
+        wf = buildHidreamT2i(config.prompt, w, h, seed);
+        break;
+      case "qwen-image-t2i":
+        wf = buildQwenImageT2i(config.prompt, w, h, seed);
+        break;
+      case "qwen-image-edit":
+        if (!refName) throw new Error("qwen-image-edit 需要 singleImage");
+        wf = buildQwenImageEdit(config.prompt, w, h, seed, refName);
+        break;
+      case "z-image-turbo":
+        wf = buildZImage(config.prompt, w, h, seed);
+        break;
+      case "simple-auto-img":
+        wf = buildSimpleAutoImg(config.prompt, w, h, seed);
+        break;
+      case "auto-workflow-img":
+        wf = buildAutoWorkflowImg(config.prompt, w, h, seed);
+        break;
+      case "sd-upscale-img":
+        if (!refName) throw new Error("sd-upscale-img 需要 reference 图片");
+        wf = buildSdUpscale(config.prompt, w, h, seed, refName);
+        break;
+      case "face-detailer":
+        if (!refName) throw new Error("face-detailer 需要 reference 图片");
+        wf = buildFaceDetailer(config.prompt, w, h, seed, refName);
+        break;
+      case "portrait-enhance":
+        if (!refName) throw new Error("portrait-enhance 需要 reference 图片");
+        wf = buildPortraitEnhance(config.prompt, w, h, seed, refName);
+        break;
+      case "hires-fix":
+        wf = buildHiresFix(config.prompt, w, h, seed);
+        break;
+      case "upscale-usdu":
+        if (!refName) throw new Error("upscale-usdu 需要 reference 图片");
+        wf = buildUpscaleUsdu(config.prompt, w, h, seed, refName);
+        break;
+      default:
+        throw new Error(`未知 image model: ${model.modelName}`);
+    }
+
+    const submit = await comfyPost("/prompt", { prompt: wf, client_id: "toonflow-comfyui-v2" });
+    if (!submit.prompt_id) throw new Error(`ComfyUI /prompt 提交失败: ${JSON.stringify(submit)}`);
+    const promptId: string = submit.prompt_id;
+    logger(`image submitted: ${promptId}, model=${model.modelName}, size=${w}x${h}, attempt=${attempt + 1}/${MAX_RETRY}`);
+
+    const out = await submitAndPoll(promptId, "image", 2000, 600_000);
+    const buf = await comfyDownloadView(out.filename, out.subfolder, out.type);
+    const mime = out.filename.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg";
+
+    if (buf.length < 50 * 1024) {
+      lastErr = `输出异常偏小 (${buf.length} bytes, 疑似 mode-collapse 白图), attempt=${attempt + 1}/${MAX_RETRY}`;
+      logger(`[retry] ${lastErr}`);
+      continue;
+    }
+    return `data:${mime};base64,${buf.toString("base64")}`;
+  }
+  throw new Error(`imageRequest 重试 ${MAX_RETRY} 次仍失败: ${lastErr}`);
 };
 
 const videoRequest = async (config: VideoConfig, model: VideoModel): Promise<string> => {
