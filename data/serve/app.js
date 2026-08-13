@@ -257109,9 +257109,46 @@ var tools_default = (toolCpnfig) => {
       ),
       execute: async ({ key }) => {
         const thinking = msg.thinking(`\u6B63\u5728\u83B7\u53D6${flowDataKeyLabels[key]}\u5DE5\u4F5C\u533A\u6570\u636E...`);
-        const flowData = await new Promise((resolve3) => socket.emit("getFlowData", { key }, (res) => resolve3(res)));
-        thinking.appendText(`\u83B7\u53D6\u5230${flowDataKeyLabels[key]}:
-` + JSON.stringify(flowData[key], null, 2));
+        const { projectId, scriptId } = resTool.data;
+        const row = await utils_default.db("o_agentWorkData").where("projectId", String(projectId)).andWhere("episodesId", String(scriptId)).andWhere("key", "productionAgent").first();
+        let flowData = null;
+        if (row && row.data) {
+          try {
+            flowData = JSON.parse(row.data);
+          } catch (e) {
+            console.error("[tools] get_flowData parse error:", e);
+          }
+        }
+        if (!flowData) {
+          const scriptData = await utils_default.db("o_script").where("projectId", projectId).where("id", scriptId).first();
+          const storyboardData = await utils_default.db("o_storyboard").where("scriptId", scriptId).orderBy("id");
+          const assets2Sb = await utils_default.db("o_assets2Storyboard").whereIn("storyboardId", storyboardData.map((s) => s.id)).orderBy("rowid");
+          const map3 = {};
+          assets2Sb.forEach((r) => {
+            if (!map3[r.storyboardId]) map3[r.storyboardId] = [];
+            map3[r.storyboardId].push(r.assetId);
+          });
+          flowData = {
+            script: scriptData?.content ?? "",
+            scriptPlan: "",
+            assets: [],
+            storyboardTable: "",
+            storyboard: storyboardData.map((s) => ({
+              id: s.id,
+              index: s.index,
+              duration: s.duration ? +s.duration : 0,
+              prompt: s.prompt,
+              associateAssetsIds: map3[s.id] ?? [],
+              src: s.filePath,
+              state: s.state,
+              videoDesc: s.videoDesc,
+              shouldGenerateImage: s.shouldGenerateImage
+            })),
+            workbench: { videoList: [] }
+          };
+        }
+        thinking.appendText(`\u83B7\u53D6\u5230${flowDataKeyLabels[key]}(len=${JSON.stringify(flowData[key]).length}):
+` + JSON.stringify(flowData[key], null, 2).slice(0, 800));
         thinking.updateTitle(`\u83B7\u53D6${flowDataKeyLabels[key]}\u5B8C\u6210`);
         thinking.complete();
         if (workMap[key] && JSON.stringify(workMap[key]) === JSON.stringify(flowData[key])) {
@@ -257376,6 +257413,13 @@ async function createSubAgent(parentCtx) {
     });
     const fullResponse = await consumeFullStream(fullStream, subMsg);
     if (fullResponse.trim()) {
+      await autoPersistSubAgentOutput(
+        resTool.data.projectId,
+        resTool.data.scriptId,
+        fullResponse
+      );
+    }
+    if (fullResponse.trim()) {
       await memory.add(memoryKey, removeAllXmlTags(fullResponse), {
         name: name28,
         createTime: new Date(subMsg.datetime).getTime()
@@ -257631,6 +257675,93 @@ function removeAllXmlTags(text2) {
   text2 = text2.replace(/<([a-zA-Z][\w-]*)(\s+[^>]*)?\/>/g, "");
   text2 = text2.replace(/<\/?[a-zA-Z][\w-]*(\s+[^>]*)?>/g, "");
   return text2.trim();
+}
+async function autoPersistSubAgentOutput(projectId, scriptId, text2) {
+  const saved = [];
+  try {
+    const spMatch = text2.match(/<scriptPlan>([\s\S]*?)<\/scriptPlan>/);
+    if (spMatch) {
+      await upsertAgentWorkData(projectId, scriptId, "productionAgent", "scriptPlan", spMatch[1].trim());
+      saved.push(`scriptPlan(${spMatch[1].trim().length})`);
+    }
+    const stMatch = text2.match(/<storyboardTable>([\s\S]*?)<\/storyboardTable>/);
+    if (stMatch) {
+      await upsertAgentWorkData(projectId, scriptId, "productionAgent", "storyboardTable", stMatch[1].trim());
+      saved.push(`storyboardTable(${stMatch[1].trim().length})`);
+    }
+    const sbRegex = /<storyboardItem\b([^>]*?)\/?>(?:[\s\S]*?<\/storyboardItem>)?/g;
+    const sbList = [];
+    let sbMatch;
+    while ((sbMatch = sbRegex.exec(text2)) !== null) {
+      const attrStr = sbMatch[1] || "";
+      const obj = { associateAssetsIds: [] };
+      const attrRegex = /(\w+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
+      let aMatch;
+      while ((aMatch = attrRegex.exec(attrStr)) !== null) {
+        const key = aMatch[1];
+        const val = aMatch[2] ?? aMatch[3] ?? "";
+        if (key === "associateAssetsIds") {
+          try {
+            obj.associateAssetsIds = JSON.parse(val.replace(/'/g, '"'));
+          } catch {
+            obj.associateAssetsIds = [];
+          }
+        } else if (key === "duration") {
+          obj.duration = parseFloat(val) || 5;
+        } else {
+          obj[key] = val;
+        }
+      }
+      if (obj.videoDesc || obj.prompt) {
+        sbList.push(obj);
+      }
+    }
+    if (sbList.length) {
+      const row = await utils_default.db("o_agentWorkData").where("projectId", String(projectId)).andWhere("episodesId", String(scriptId)).andWhere("key", "productionAgent").first();
+      let data = {};
+      if (row && row.data) {
+        try {
+          data = JSON.parse(row.data);
+        } catch {
+        }
+      }
+      const existing = Array.isArray(data.storyboard) ? data.storyboard : [];
+      const map3 = {};
+      for (const sb of existing) if (sb.videoDesc) map3[sb.videoDesc] = sb;
+      for (const sb of sbList) if (sb.videoDesc) map3[sb.videoDesc] = sb;
+      data.storyboard = Object.values(map3);
+      if (row) {
+        await utils_default.db("o_agentWorkData").where({ id: row.id }).update({ data: JSON.stringify(data) });
+      } else {
+        await utils_default.db("o_agentWorkData").insert({ projectId, episodesId: scriptId, key: "productionAgent", data: JSON.stringify(data) });
+      }
+      saved.push(`storyboardItem\xD7${sbList.length}`);
+      for (const sb of sbList) {
+        if (sb.id) continue;
+      }
+    }
+    if (saved.length) {
+      console.info(`[productionAgent autoPersist] project=${projectId} script=${scriptId} saved: ${saved.join(", ")}`);
+    }
+  } catch (e) {
+    console.error("[productionAgent autoPersist] error:", e);
+  }
+}
+async function upsertAgentWorkData(projectId, scriptId, key, field, value) {
+  const row = await utils_default.db("o_agentWorkData").where("projectId", String(projectId)).andWhere("episodesId", String(scriptId)).andWhere("key", key).first();
+  let data = {};
+  if (row && row.data) {
+    try {
+      data = JSON.parse(row.data);
+    } catch {
+    }
+  }
+  data[field] = value;
+  if (row) {
+    await utils_default.db("o_agentWorkData").where({ id: row.id }).update({ data: JSON.stringify(data) });
+  } else {
+    await utils_default.db("o_agentWorkData").insert({ projectId, episodesId: scriptId, key, data: JSON.stringify(data) });
+  }
 }
 function buildSkillPrompt(skills) {
   const skillEntries = skills.map((s) => `  <skill>
@@ -258398,12 +258529,22 @@ var tools_default2 = (toolCpnfig) => {
       execute: async ({ key }) => {
         console.log("[tools] get_planData", key);
         const thinking = msg.thinking(`\u6B63\u5728\u83B7\u53D6${planDataKeyLabels[key]}\u5DE5\u4F5C\u533A\u6570\u636E...`);
-        const planData2 = await new Promise((resolve3) => socket.emit("getPlanData", { key }, (res) => resolve3(res)));
-        thinking.appendText(`\u83B7\u53D6\u5230${planDataKeyLabels[key]}:
-` + planData2[key]);
+        const row = await utils_default.db("o_agentWorkData").where({ projectId: resTool.data.projectId, key: "scriptAgent" }).first();
+        let data = { storySkeleton: "", adaptationStrategy: "", script: "" };
+        if (row && row.data) {
+          try {
+            const parsed = JSON.parse(row.data);
+            data = { ...data, ...parsed };
+          } catch (e) {
+            console.error("[tools] get_planData parse error:", e);
+          }
+        }
+        const value = data[key] ?? "";
+        thinking.appendText(`\u83B7\u53D6\u5230${planDataKeyLabels[key]}(len=${String(value).length}):
+` + (typeof value === "string" ? value.slice(0, 500) : JSON.stringify(value).slice(0, 500)));
         thinking.updateTitle(`\u83B7\u53D6${planDataKeyLabels[key]}\u5B8C\u6210`);
         thinking.complete();
-        return planData2[key] ?? "\u65E0\u6570\u636E";
+        return value || "\u65E0\u6570\u636E";
       }
     }),
     get_novel_text: tool({
@@ -258534,6 +258675,9 @@ function createSubAgent2(parentCtx) {
       tools: { ...extraTools, ...tools_default2({ resTool, msg: subMsg }) }
     });
     const fullResponse = await consumeFullStream2(fullStream, subMsg);
+    if (fullResponse.trim()) {
+      await autoPersistSubAgentOutput2(resTool.data.projectId, fullResponse);
+    }
     if (fullResponse.trim()) {
       await memory.add(memoryKey, removeAllXmlTags2(fullResponse), {
         name: name28,
@@ -258702,6 +258846,57 @@ function removeAllXmlTags2(text2) {
   text2 = text2.replace(/<([a-zA-Z][\w-]*)(\s+[^>]*)?\/>/g, "");
   text2 = text2.replace(/<\/?[a-zA-Z][\w-]*(\s+[^>]*)?>/g, "");
   return text2.trim();
+}
+async function autoPersistSubAgentOutput2(projectId, text2) {
+  const saved = [];
+  try {
+    const skMatch = text2.match(/<storySkeleton>([\s\S]*?)<\/storySkeleton>/);
+    if (skMatch) {
+      await upsertAgentWorkData2(projectId, "scriptAgent", "storySkeleton", skMatch[1].trim());
+      saved.push(`storySkeleton(${skMatch[1].trim().length})`);
+    }
+    const asMatch = text2.match(/<adaptationStrategy>([\s\S]*?)<\/adaptationStrategy>/);
+    if (asMatch) {
+      await upsertAgentWorkData2(projectId, "scriptAgent", "adaptationStrategy", asMatch[1].trim());
+      saved.push(`adaptationStrategy(${asMatch[1].trim().length})`);
+    }
+    const siRegex = /<scriptItem\s+name="([^"]+)">([\s\S]*?)<\/scriptItem>/g;
+    let siMatch;
+    let siCount = 0;
+    while ((siMatch = siRegex.exec(text2)) !== null) {
+      const name28 = siMatch[1];
+      const content = siMatch[2];
+      const existing = await utils_default.db("o_script").where({ projectId, name: name28 }).first();
+      if (existing) {
+        await utils_default.db("o_script").where({ id: existing.id }).update({ content });
+      } else {
+        await utils_default.db("o_script").insert({ projectId, name: name28, content });
+      }
+      siCount++;
+    }
+    if (siCount) saved.push(`scriptItem\xD7${siCount}`);
+    if (saved.length) {
+      console.info(`[scriptAgent autoPersist] project=${projectId} saved: ${saved.join(", ")}`);
+    }
+  } catch (e) {
+    console.error("[scriptAgent autoPersist] error:", e);
+  }
+}
+async function upsertAgentWorkData2(projectId, key, field, value) {
+  const row = await utils_default.db("o_agentWorkData").where({ projectId, key }).first();
+  let data = {};
+  if (row && row.data) {
+    try {
+      data = JSON.parse(row.data);
+    } catch {
+    }
+  }
+  data[field] = value;
+  if (row) {
+    await utils_default.db("o_agentWorkData").where({ id: row.id }).update({ data: JSON.stringify(data) });
+  } else {
+    await utils_default.db("o_agentWorkData").insert({ projectId, key, data: JSON.stringify(data) });
+  }
 }
 
 // src/socket/routes/scriptAgent.ts
