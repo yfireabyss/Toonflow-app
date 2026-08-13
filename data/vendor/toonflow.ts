@@ -425,6 +425,7 @@ const imageRequest = async (config: ImageConfig, model: ImageModel): Promise<str
           return { completed: false };
       }
     });
+    if (res.error) throw new Error(res.error);
     return res.data!;
   }
 
