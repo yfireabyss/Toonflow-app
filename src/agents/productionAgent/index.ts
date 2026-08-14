@@ -157,7 +157,7 @@ async function createSubAgent(parentCtx: AgentContext) {
 
   const projectInfo = await u.db("o_project").where("id", resTool.data.projectId).first();
   if (!projectInfo) throw new Error(`项目不存在，ID: ${resTool.data.projectId}`);
-  const artSkills = await createArtSkills(projectInfo?.artStyle!, projectInfo?.directorManual!);
+  const artSkills = await createArtSkills(projectInfo?.artStyle!, projectInfo?.directorManual!, projectInfo?.type);
 
   const [_, imageModelName] = projectInfo.imageModel!.split(/:(.+)/);
   const [id, videoModelName] = projectInfo.videoModel!.split(/:(.+)/);
@@ -306,7 +306,7 @@ async function createSubAgent(parentCtx: AgentContext) {
   //   mainSkills.push({ path: skillPath, ...parsed });
   // }
 
-  const productionSkills = await useProductionSkills(projectInfo?.artStyle!, projectInfo?.directorManual!);
+  const productionSkills = await useProductionSkills(projectInfo?.artStyle!, projectInfo?.directorManual!, projectInfo?.type);
 
   //分镜面板写入
   const run_sub_agent_storyboard_panel = tool({
@@ -386,7 +386,7 @@ async function createSubAgent(parentCtx: AgentContext) {
   };
 }
 
-async function createArtSkills(artName: string, storyName: string) {
+async function createArtSkills(artName: string, storyName: string, projectType?: string) {
   const artWorkerPath = u.getPath(["skills", "art_skills", artName, "driector_skills"]);
   const storyWorkerPath = u.getPath(["skills", "story_skills", storyName, "driector_skills"]);
   const skillList = [...(await scanSkills(artWorkerPath + "/*.md")), ...(await scanSkills(storyWorkerPath + "/*.md"))];
@@ -397,11 +397,47 @@ async function createArtSkills(artName: string, storyName: string) {
     const parsed = parseFrontmatter(content);
     mainSkills.push({ path: skillPath, ...parsed });
   }
-  const res = {
-    prompt: `## Skills
+  let prompt = `## Skills
 以下技能提供了专业任务的专用指令。
 当任务与某个技能的描述匹配时，调用 activate_skill 工具并传入技能名称来加载完整指令。
-${buildSkillPrompt(mainSkills)}`,
+${buildSkillPrompt(mainSkills)}`;
+
+  // 8-14 临时 override: 项目类型为末世/科幻/现代/废土/灾难时, 忽略 art_skills 风格文件里
+  // 关于"中国传统色彩/国风/东方美学"的硬约束, 强制注入末世废土风格锚词, 避免跑题.
+  // 触发条件仅看 projectType (中文 o_project.type 字段), 不改 art_skills 风格文件本身.
+  // 等主人后续指定时间回滚此 override.
+  const overrideTypes = ["末世", "科幻", "现代", "废土", "灾难", "赛博", "都市"];
+  if (projectType && overrideTypes.some((t) => projectType.includes(t))) {
+    const typeOverride = `
+
+---
+
+## ⚠️ 项目类型 override · 末世/科幻/现代/废土/灾难
+
+本项目类型为 \`${projectType}\`, 属于非古代/非仙侠/非宫廷类作品. **请忽略** 上面 Skills 中 art_skills 风格文件 (\`director_storyboard.md\` / \`director_storyboard_table_style.md\` / \`director_planning_style.md\` 等) 里的以下硬约束, 因为它们与本项目题材冲突:
+
+- **R3**: 必须包含"中国传统色彩 + 东方美学"
+- **R5**: 必须声明"国风3D美学"
+- **X3**: 严禁"西方奇幻/赛博朋克/现代元素"
+- **美学禁止项**: "现代建筑/现代服饰元素"、"西方奇幻/赛博朋克/现代元素"
+- **固定风格锚定词**: "3D渲染锚定"里的"国风3D"、"风格收尾"里的"国风3D渲染，东方美学"
+
+**改为遵循以下 override 规则** (本项目强制):
+
+- 整体美术基调: \`post-apocalyptic\` (末世废土) / \`sci-fi\` (科幻) / \`modern urban\` (现代都市), 与 \`${projectType}\` 类型严格一致
+- 风格锚词 (必须包含): \`post-apocalyptic, ruined city, debris, ash, dust, smoke, weathered concrete, rusted metal, broken glass, modern ruins, sci-fi elements\`
+- 严禁元素: 古风建筑/宫殿/朱红宫墙/金顶琉璃/雕梁画栋/汉白玉/青绿山水/假山池沼/竹林雪地/灯笼街灯/古典家具/古装服饰/汉服襦裙/仙侠/武侠/古剑
+- **保留** 3D 渲染 / PBR 材质 / 高精度建模 / 电影级光影 这些技术级要求 (它们是渲染技术, 与题材无关)
+- 保留 PBR 色彩盘 (月白/墨黑/赭石/素灰 等) 作为可选基础色, 但**不强制**国风色调
+- 情绪场景覆盖: 末世压抑/废土肃杀/灾后重建/科技冰冷 等情绪词替换宫廷华贵/山水意境/闺阁温婉/武侠肃杀/节日喜庆/月夜清幽
+
+**何时生效**: 本 override 在所有分镜生图 / 资产生图 / 视频提示词生成 subAgent 中均生效. 当任何艺术风格约束与本 override 冲突时, **以本 override 为准**.
+`;
+    prompt = prompt + typeOverride;
+  }
+
+  const res = {
+    prompt,
     tools: createSkillTools(mainSkills, { mainSkill: mainSkills, secondarySkills: [], tertiarySkills: [] }),
   };
   return res;
@@ -610,7 +646,7 @@ ${skillEntries}
 </available_skills>`;
 }
 
-async function useProductionSkills(artName: string, storyName: string) {
+async function useProductionSkills(artName: string, storyName: string, projectType?: string) {
   const artWorkerPath = u.getPath(["skills", "art_skills", artName, "driector_skills"]);
   const storyWorkerPath = u.getPath(["skills", "story_skills", storyName, "driector_skills"]);
   const productionPath = u.getPath(["skills", "production_skills"]);
@@ -626,11 +662,27 @@ async function useProductionSkills(artName: string, storyName: string) {
     const parsed = parseFrontmatter(content);
     mainSkills.push({ path: skillPath, ...parsed });
   }
-  const res = {
-    prompt: `## Skills
+  let prompt = `## Skills
 以下技能提供了专业任务的专用指令。
 当任务与某个技能的描述匹配时，调用 activate_skill 工具并传入技能名称来加载完整指令。
-${buildSkillPrompt(mainSkills)}`,
+${buildSkillPrompt(mainSkills)}`;
+
+  // 8-14 临时 override: 项目类型为末世/科幻/现代/废土/灾难时, 忽略 art_skills 风格文件里
+  // 关于"中国传统色彩/国风/东方美学"的硬约束. 与 createArtSkills 同步逻辑.
+  const overrideTypes = ["末世", "科幻", "现代", "废土", "灾难", "赛博", "都市"];
+  if (projectType && overrideTypes.some((t) => projectType.includes(t))) {
+    prompt = prompt + `
+
+---
+
+## ⚠️ 项目类型 override · 末世/科幻/现代/废土/灾难
+
+本项目类型为 \`${projectType}\`. 忽略 art_skills 风格文件里的 R3 (中国传统色彩/东方美学) / R5 (国风3D美学) / X3 (严禁西方奇幻/赛博朋克/现代元素) / 美学禁止项 (现代建筑/现代服饰元素) 约束, 强制使用末世废土风格: \`post-apocalyptic, ruined city, debris, ash, dust, smoke, weathered concrete, rusted metal, broken glass, modern ruins, sci-fi elements\`. 严禁古风建筑/宫殿/汉服/仙侠/武侠. 保留 3D渲染/PBR材质/电影级光影这些技术要求. 本 override 与上面任何艺术风格约束冲突时, 以本 override 为准.
+`;
+  }
+
+  const res = {
+    prompt,
     tools: createSkillTools(mainSkills, { mainSkill: mainSkills, secondarySkills: [], tertiarySkills: [] }),
   };
   return res;
