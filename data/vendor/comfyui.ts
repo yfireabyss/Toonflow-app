@@ -100,6 +100,8 @@ interface PollResult {
 interface SaveImageOutput {
   images?: { filename: string; subfolder: string; type: string }[];
   gifs?: { filename: string; subfolder: string; type: string }[];
+  // 2026-08-14: TTS 输出 (SaveAudio / SaveAudioMP3 / ElevenLabsTextToSpeech 等节点)
+  audio?: { filename: string; subfolder: string; type: string }[];
 }
 
 interface HistoryEntry {
@@ -418,6 +420,44 @@ const vendor: VendorConfig = {
         { duration: [2, 3, 4, 5], resolution: ["480p"] },
       ],
     },
+    // ============================================================
+    // 2026-08-14 mavis phase14: TTS 工作流 (3 个)
+    // ============================================================
+    {
+      // F5-TTS (AIFSH F5-TTS-ComfyUI) — 开源 SOTA 音色克隆 TTS
+      // 2026-08-14 实测: F5TTSNode 缺 torchcodec 依赖, 需 `pip install torchcodec` 才能跑
+      // (ComfyUI 0.28 + torchaudio 2.9.1 切到 torchcodec 后端, F5TTSNode 源码用 torchaudio.save 触发 ImportError)
+      name: "F5-TTS (开源 SOTA, 本机 ref_audio 音色克隆, 需 torchcodec)",
+      modelName: "f5-tts",
+      type: "tts",
+      voices: [
+        { title: "默认中文 ref 音色 (input/ttson_4702_1_trim_0.00-5.00.wav)", voice: "default" },
+        { title: "主人自定义 ref_audio (传 referenceList.audio)", voice: "custom" },
+      ],
+    },
+    {
+      // E2-TTS (F5-TTS 变体, 英文友好, 同样需 torchcodec)
+      name: "E2-TTS (F5-TTS 变体, 英文友好, 需 torchcodec)",
+      modelName: "e2-tts",
+      type: "tts",
+      voices: [
+        { title: "默认中文 ref 音色", voice: "default" },
+        { title: "主人自定义 ref_audio", voice: "custom" },
+      ],
+    },
+    {
+      // ElevenLabs 云端 TTS — 需在 vendor.inputValues.apiKey 配 ElevenLabs API key
+      // (vendor getHeaders() 自动透传 Authorization Bearer 头)
+      name: "ElevenLabs (云端 TTS, 需 API key)",
+      modelName: "elevenlabs",
+      type: "tts",
+      voices: [
+        { title: "Rachel (女, 美式英语, calm)", voice: "21m00Tcm4TlvDq8ikWAM" },
+        { title: "Adam (男, 美式英语, deep)", voice: "pNInz6obpgDQGcFmaJgB" },
+        { title: "Bella (女, 美式英语, soft)", voice: "EXAVITQu4vr4xnSDxMaL" },
+        { title: "Antoni (男, 美式英语, well-rounded)", voice: "ErXwobaYiN019PkySvjV" },
+      ],
+    },
   ],
 };
 
@@ -530,19 +570,25 @@ async function comfyUploadAudio(base64: string, filename: string = "ref.wav"): P
   return resp.data.name;
 }
 
-function findOutputFile(entry: HistoryEntry, prefer: "video" | "image"): { filename: string; subfolder: string; type: string } | null {
+function findOutputFile(entry: HistoryEntry, prefer: "video" | "image" | "audio"): { filename: string; subfolder: string; type: string } | null {
   const allFiles: { filename: string; subfolder: string; type: string }[] = [];
   for (const nodeId of Object.keys(entry.outputs || {})) {
     const o = entry.outputs[nodeId];
     if (o.images && o.images.length > 0) allFiles.push(...o.images);
     if (o.gifs && o.gifs.length > 0) allFiles.push(...o.gifs);
+    if (o.audio && o.audio.length > 0) allFiles.push(...o.audio);
   }
   if (allFiles.length === 0) return null;
   const videoRe = /\.(mp4|webm|gif|mov|avi)$/i;
   const imageRe = /\.(png|jpg|jpeg|webp)$/i;
+  const audioRe = /\.(wav|mp3|flac|ogg|opus)$/i;
   if (prefer === "video") {
     const v = allFiles.find((f) => videoRe.test(f.filename));
     if (v) return v;
+  } else if (prefer === "audio") {
+    // 2026-08-14: TTS 链路优先返回 wav/mp3/opus 等音频文件
+    const a = allFiles.find((f) => audioRe.test(f.filename));
+    if (a) return a;
   } else {
     const i = allFiles.find((f) => imageRe.test(f.filename));
     if (i) return i;
@@ -550,7 +596,7 @@ function findOutputFile(entry: HistoryEntry, prefer: "video" | "image"): { filen
   return allFiles[0];
 }
 
-async function submitAndPoll(promptId: string, prefer: "video" | "image", pollIntervalMs: number, pollTimeoutMs: number): Promise<{ filename: string; subfolder: string; type: string }> {
+async function submitAndPoll(promptId: string, prefer: "video" | "image" | "audio", pollIntervalMs: number, pollTimeoutMs: number): Promise<{ filename: string; subfolder: string; type: string }> {
   const result = await pollTask(async () => {
     // 2026-08-13: history 拉大到 100, timeout 60s
     // 原因: ComfyUI 跑图时 /history 常超 10s, 之前直接 axios 超时 → pollTask catch 后 return 不重试
@@ -1447,6 +1493,65 @@ function buildLtxSvdCrossfade(prompt: string, width: number, height: number, len
   };
 }
 
+// ---- D 档 (TTS, 2026-08-14 新增) ----
+
+function buildF5Tts(
+  text: string,
+  refAudioName: string,
+  modelChoice: "F5-TTS" | "E2-TTS",
+  speed: number = 1.0,
+  removeSilence: boolean = true,
+  splitWords: string = "but,however,nevertheless,yet,still,therefore,thus,hence,consequently,moreover,furthermore,additionally,meanwhile,alternatively,otherwise,namely,specifically,for example,such as,in fact,indeed,notably,in contrast,on the other hand,conversely,in conclusion,to summarize,finally",
+): any {
+  // F5TTSNode (AIFSH F5-TTS-ComfyUI) — 开源 SOTA 音色克隆 TTS
+  // 链路: LoadAudio(ref wav) → F5TTSNode(gen_text+ref_audio) → SaveAudio → wav 文件
+  // 2026-08-14 实测: F5TTSNode 当前依赖 torchcodec (torchaudio 2.9+ 后端),
+  //                  需在 ComfyUI python 跑 `pip install torchcodec` 才能正常执行
+  return {
+    "1": { class_type: "LoadAudio", inputs: { audio: refAudioName } },
+    "2": {
+      class_type: "F5TTSNode",
+      inputs: {
+        gen_text: text,
+        ref_audio: ["1", 0],
+        model_choice: modelChoice,
+        speed,
+        remove_silence: removeSilence,
+        split_words: splitWords,
+      },
+    },
+    "3": { class_type: "SaveAudio", inputs: { audio: ["2", 0], filename_prefix: "toonflow_f5tts" } },
+  };
+}
+
+function buildElevenLabsTts(
+  text: string,
+  voiceId: string,
+  stability: number = 0.5,
+  model: string = "eleven_multilingual_v2",
+  outputFormat: string = "mp3_44100_128",
+): any {
+  // ElevenLabsTextToSpeech — 云端 TTS, vendor.inputValues.apiKey 配 ElevenLabs API key
+  // getHeaders() 自动加 Authorization Bearer 头
+  // output_format: 默认 mp3_44100_128 (128kbps mp3)
+  return {
+    "1": {
+      class_type: "ElevenLabsTextToSpeech",
+      inputs: {
+        voice: voiceId,
+        text,
+        stability,
+        apply_text_normalization: "auto",
+        model,
+        language_code: "",
+        seed: 0,
+        output_format: outputFormat,
+      },
+    },
+    "2": { class_type: "SaveAudio", inputs: { audio: ["1", 0], filename_prefix: "toonflow_elevenlabs" } },
+  };
+}
+
 // ============================================================
 // 适配器函数
 // ============================================================
@@ -1675,7 +1780,60 @@ const videoRequest = async (config: VideoConfig, model: VideoModel): Promise<str
 };
 
 const ttsRequest = async (config: any, model: TTSModel): Promise<string> => {
-  throw new Error("本机 ComfyUI 供应商暂未实现 TTS（FB_Qwen3TTS 节点未装）");
+  if (!vendor.inputValues.baseUrl) throw new Error("缺少 ComfyUI baseUrl 配置");
+  const text: string = config.text || "";
+  if (!text) throw new Error("TTSConfig.text 不能为空");
+  // 2026-08-14: speechRate 范围 0.5-2.0 (F5TTSNode 默认 1.0; ElevenLabs 暂未映射此字段)
+  const speechRate: number = config.speechRate || 1.0;
+  // 2026-08-14: TTSConfig.voice 优先 (per-call 覆盖), 否则取 model.voices[0].voice
+  const voiceOverride: string | undefined = config.voice;
+  // 2026-08-14: referenceList 里 type="audio" 的当 ref_audio
+  const refAudio = (config.referenceList || []).find((r: any) => r.type === "audio");
+
+  let wf: any;
+  switch (model.modelName) {
+    case "f5-tts":
+    case "e2-tts": {
+      // 2026-08-14: F5TTSNode 缺 torchcodec 依赖, 装 `pip install torchcodec` 才能跑
+      // (ComfyUI 0.28 + torchaudio 2.9.1 切到 torchcodec 后端, F5TTSNode 源码用 torchaudio.save 触发 ImportError)
+      let refName: string;
+      if (refAudio) {
+        refName = await comfyUploadAudio(refAudio.base64, `tts_ref_${Date.now()}.wav`);
+      } else {
+        // fallback: input 目录默认中文 ref (5s 干净音色 ttson_4702_1)
+        refName = "ttson_4702_1_trim_0.00-5.00.wav";
+      }
+      const modelChoice = model.modelName === "e2-tts" ? "E2-TTS" : "F5-TTS";
+      wf = buildF5Tts(text, refName, modelChoice, speechRate);
+      break;
+    }
+    case "elevenlabs": {
+      // ElevenLabs: voice id 从 TTSConfig.voice 拿, 否则 model.voices[0] 默认
+      const voiceId = voiceOverride || (model.voices[0]?.voice ?? "21m00Tcm4TlvDq8ikWAM");
+      wf = buildElevenLabsTts(text, voiceId);
+      break;
+    }
+    default:
+      throw new Error(`未知 tts model: ${model.modelName}`);
+  }
+
+  const submit = await comfyPost("/prompt", { prompt: wf, client_id: "toonflow-comfyui-tts" });
+  if (!submit.prompt_id) throw new Error(`ComfyUI /prompt 提交失败: ${JSON.stringify(submit)}`);
+  const promptId: string = submit.prompt_id;
+  logger(`tts submitted: ${promptId}, model=${model.modelName}, text_len=${text.length}`);
+
+  // TTS 通常 5-30s, 但首次跑要下载 ~6GB 模型 (F5-TTS + vocos + whisper-large-v3-turbo) 可能 5-15 min
+  // timeout 15 min 兜底
+  const out = await submitAndPoll(promptId, "audio", 3000, 900_000);
+  const buf = await comfyDownloadView(out.filename, out.subfolder, out.type);
+  // 按扩展名判定 mime
+  const lower = out.filename.toLowerCase();
+  const mime = lower.endsWith(".mp3")
+    ? "audio/mpeg"
+    : lower.endsWith(".opus")
+      ? "audio/opus"
+      : "audio/wav";
+  return `data:${mime};base64,${buf.toString("base64")}`;
 };
 
 // ============================================================
