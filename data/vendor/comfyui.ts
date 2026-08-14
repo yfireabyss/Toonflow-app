@@ -1089,7 +1089,7 @@ function buildLtx2_3TrulyStartEnd(prompt: string, width: number, height: number,
     "24": { class_type: "LoadImage", inputs: { image: endImg } },
     "25": { class_type: "ImageScale", inputs: { image: ["24", 0], width, height, upscale_method: "lanczos", crop: "center" } },
     "5": { class_type: "EmptyLTXVLatentVideo", inputs: { width, height, length, batch_size: 1 } },
-    "23": { class_type: "LTXVFirstLastFrameControl_TTP", inputs: { vae: ["1", 2], latent: ["5", 0], first_strength: 1.0, last_strength: 1.0, first_image: ["21", 0], last_image: ["25", 0] } },
+    "23": { class_type: "LTXVFirstLastFrameControl_TTP", inputs: { vae: ["1", 2], latent: ["5", 0], first_strength: 0.8, last_strength: 0.8, first_image: ["21", 0], last_image: ["25", 0] } },
     "7": { class_type: "LTXVScheduler", inputs: { steps: 20, max_shift: 2.05, base_shift: 0.95, stretch: true, terminal: 0.1 } },
     "8": { class_type: "KSamplerSelect", inputs: { sampler_name: "euler" } },
     "9": {
