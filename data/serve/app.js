@@ -242045,19 +242045,7 @@ var init_generateVideoPrompt = __esm({
           }
         }
         const artStyle = projectData?.artStyle || "\u65E0";
-        const projectType = projectData?.type || "";
         let visualManual = utils_default.getArtPrompt(artStyle, "art_skills", "art_storyboard_video");
-        const overrideTypes = ["\u672B\u4E16", "\u79D1\u5E7B", "\u73B0\u4EE3", "\u5E9F\u571F", "\u707E\u96BE", "\u8D5B\u535A", "\u90FD\u5E02"];
-        if (projectType && overrideTypes.some((t) => projectType.includes(t))) {
-          visualManual = visualManual + `
-
----
-
-## \u26A0\uFE0F \u9879\u76EE\u7C7B\u578B override \xB7 \u672B\u4E16/\u79D1\u5E7B/\u73B0\u4EE3/\u5E9F\u571F/\u707E\u96BE
-
-\u672C\u9879\u76EE\u7C7B\u578B\u4E3A \`${projectType}\`. **\u5FFD\u7565** \u4E0A\u9762\u827A\u672F\u98CE\u683C\u7EA6\u675F\u91CC\u6240\u6709"\u56FD\u98CE3D\u6E32\u67D3 / Chinese traditional 3D render / \u4E1C\u65B9\u7F8E\u5B66 / \u56FD\u98CE3D\u7F8E\u5B66"\u6807\u7B7E, \u6539\u4E3A\u8F93\u51FA: \`post-apocalyptic, ruined city, debris, ash, dust, smoke, weathered concrete, rusted metal, modern ruins, cinematic, shallow depth of field\`. \u4E25\u7981\u53E4\u98CE/\u5BAB\u6BBF/\u6C49\u670D/\u4ED9\u4FA0. \u4FDD\u7559 cinematic / PBR / \u4F53\u79EF\u5149 \u8FD9\u4E9B\u6280\u672F\u6027\u89C6\u89C9\u8BCD. \u672C override \u4E0E\u98CE\u683C\u7EA6\u675F\u51B2\u7A81\u65F6, \u4EE5\u672C override \u4E3A\u51C6.
-`;
-        }
         const storyboardContext = storyboard.map((i) => {
           const prevDesc = (i.prevStoryboards || []).map((p3) => `\u3010\u7B2C${p3.index}\u955C\u3011${p3.videoDesc}`).join("\n");
           const curDesc = `\u3010\u672C\u955C\u3011${i.videoDesc}`;
@@ -257503,7 +257491,7 @@ async function createSubAgent(parentCtx) {
   }).toJSONSchema();
   const projectInfo = await utils_default.db("o_project").where("id", resTool.data.projectId).first();
   if (!projectInfo) throw new Error(`\u9879\u76EE\u4E0D\u5B58\u5728\uFF0CID: ${resTool.data.projectId}`);
-  const artSkills = await createArtSkills(projectInfo?.artStyle, projectInfo?.directorManual, projectInfo?.type);
+  const artSkills = await createArtSkills(projectInfo?.artStyle, projectInfo?.directorManual);
   const [_, imageModelName] = projectInfo.imageModel.split(/:(.+)/);
   const [id, videoModelName] = projectInfo.videoModel.split(/:(.+)/);
   const models = await utils_default.vendor.getModelList(id);
@@ -257604,7 +257592,7 @@ ${modelInfo}` },
       });
     }
   });
-  const productionSkills = await useProductionSkills(projectInfo?.artStyle, projectInfo?.directorManual, projectInfo?.type);
+  const productionSkills = await useProductionSkills(projectInfo?.artStyle, projectInfo?.directorManual);
   const run_sub_agent_storyboard_panel = tool({
     description: "\u8FD0\u884C\u6267\u884CsubAgent\u6765\u5B8C\u6210\u5206\u955C\u9762\u677F\u5199\u5165\u76F8\u5173\u4EFB\u52A1",
     inputSchema: jsonSchema(promptInput),
@@ -257674,7 +257662,7 @@ ${modelInfo}` },
     run_sub_agent_supervision
   };
 }
-async function createArtSkills(artName, storyName, projectType) {
+async function createArtSkills(artName, storyName) {
   const artWorkerPath = utils_default.getPath(["skills", "art_skills", artName, "driector_skills"]);
   const storyWorkerPath = utils_default.getPath(["skills", "story_skills", storyName, "driector_skills"]);
   const skillList = [...await scanSkills(artWorkerPath + "/*.md"), ...await scanSkills(storyWorkerPath + "/*.md")];
@@ -257685,41 +257673,11 @@ async function createArtSkills(artName, storyName, projectType) {
     const parsed = parseFrontmatter(content);
     mainSkills.push({ path: skillPath, ...parsed });
   }
-  let prompt = `## Skills
+  const res = {
+    prompt: `## Skills
 \u4EE5\u4E0B\u6280\u80FD\u63D0\u4F9B\u4E86\u4E13\u4E1A\u4EFB\u52A1\u7684\u4E13\u7528\u6307\u4EE4\u3002
 \u5F53\u4EFB\u52A1\u4E0E\u67D0\u4E2A\u6280\u80FD\u7684\u63CF\u8FF0\u5339\u914D\u65F6\uFF0C\u8C03\u7528 activate_skill \u5DE5\u5177\u5E76\u4F20\u5165\u6280\u80FD\u540D\u79F0\u6765\u52A0\u8F7D\u5B8C\u6574\u6307\u4EE4\u3002
-${buildSkillPrompt(mainSkills)}`;
-  const overrideTypes = ["\u672B\u4E16", "\u79D1\u5E7B", "\u73B0\u4EE3", "\u5E9F\u571F", "\u707E\u96BE", "\u8D5B\u535A", "\u90FD\u5E02"];
-  if (projectType && overrideTypes.some((t) => projectType.includes(t))) {
-    const typeOverride = `
-
----
-
-## \u26A0\uFE0F \u9879\u76EE\u7C7B\u578B override \xB7 \u672B\u4E16/\u79D1\u5E7B/\u73B0\u4EE3/\u5E9F\u571F/\u707E\u96BE
-
-\u672C\u9879\u76EE\u7C7B\u578B\u4E3A \`${projectType}\`, \u5C5E\u4E8E\u975E\u53E4\u4EE3/\u975E\u4ED9\u4FA0/\u975E\u5BAB\u5EF7\u7C7B\u4F5C\u54C1. **\u8BF7\u5FFD\u7565** \u4E0A\u9762 Skills \u4E2D art_skills \u98CE\u683C\u6587\u4EF6 (\`director_storyboard.md\` / \`director_storyboard_table_style.md\` / \`director_planning_style.md\` \u7B49) \u91CC\u7684\u4EE5\u4E0B\u786C\u7EA6\u675F, \u56E0\u4E3A\u5B83\u4EEC\u4E0E\u672C\u9879\u76EE\u9898\u6750\u51B2\u7A81:
-
-- **R3**: \u5FC5\u987B\u5305\u542B"\u4E2D\u56FD\u4F20\u7EDF\u8272\u5F69 + \u4E1C\u65B9\u7F8E\u5B66"
-- **R5**: \u5FC5\u987B\u58F0\u660E"\u56FD\u98CE3D\u7F8E\u5B66"
-- **X3**: \u4E25\u7981"\u897F\u65B9\u5947\u5E7B/\u8D5B\u535A\u670B\u514B/\u73B0\u4EE3\u5143\u7D20"
-- **\u7F8E\u5B66\u7981\u6B62\u9879**: "\u73B0\u4EE3\u5EFA\u7B51/\u73B0\u4EE3\u670D\u9970\u5143\u7D20"\u3001"\u897F\u65B9\u5947\u5E7B/\u8D5B\u535A\u670B\u514B/\u73B0\u4EE3\u5143\u7D20"
-- **\u56FA\u5B9A\u98CE\u683C\u951A\u5B9A\u8BCD**: "3D\u6E32\u67D3\u951A\u5B9A"\u91CC\u7684"\u56FD\u98CE3D"\u3001"\u98CE\u683C\u6536\u5C3E"\u91CC\u7684"\u56FD\u98CE3D\u6E32\u67D3\uFF0C\u4E1C\u65B9\u7F8E\u5B66"
-
-**\u6539\u4E3A\u9075\u5FAA\u4EE5\u4E0B override \u89C4\u5219** (\u672C\u9879\u76EE\u5F3A\u5236):
-
-- \u6574\u4F53\u7F8E\u672F\u57FA\u8C03: \`post-apocalyptic\` (\u672B\u4E16\u5E9F\u571F) / \`sci-fi\` (\u79D1\u5E7B) / \`modern urban\` (\u73B0\u4EE3\u90FD\u5E02), \u4E0E \`${projectType}\` \u7C7B\u578B\u4E25\u683C\u4E00\u81F4
-- \u98CE\u683C\u951A\u8BCD (\u5FC5\u987B\u5305\u542B): \`post-apocalyptic, ruined city, debris, ash, dust, smoke, weathered concrete, rusted metal, broken glass, modern ruins, sci-fi elements\`
-- \u4E25\u7981\u5143\u7D20: \u53E4\u98CE\u5EFA\u7B51/\u5BAB\u6BBF/\u6731\u7EA2\u5BAB\u5899/\u91D1\u9876\u7409\u7483/\u96D5\u6881\u753B\u680B/\u6C49\u767D\u7389/\u9752\u7EFF\u5C71\u6C34/\u5047\u5C71\u6C60\u6CBC/\u7AF9\u6797\u96EA\u5730/\u706F\u7B3C\u8857\u706F/\u53E4\u5178\u5BB6\u5177/\u53E4\u88C5\u670D\u9970/\u6C49\u670D\u8966\u88D9/\u4ED9\u4FA0/\u6B66\u4FA0/\u53E4\u5251
-- **\u4FDD\u7559** 3D \u6E32\u67D3 / PBR \u6750\u8D28 / \u9AD8\u7CBE\u5EA6\u5EFA\u6A21 / \u7535\u5F71\u7EA7\u5149\u5F71 \u8FD9\u4E9B\u6280\u672F\u7EA7\u8981\u6C42 (\u5B83\u4EEC\u662F\u6E32\u67D3\u6280\u672F, \u4E0E\u9898\u6750\u65E0\u5173)
-- \u4FDD\u7559 PBR \u8272\u5F69\u76D8 (\u6708\u767D/\u58A8\u9ED1/\u8D6D\u77F3/\u7D20\u7070 \u7B49) \u4F5C\u4E3A\u53EF\u9009\u57FA\u7840\u8272, \u4F46**\u4E0D\u5F3A\u5236**\u56FD\u98CE\u8272\u8C03
-- \u60C5\u7EEA\u573A\u666F\u8986\u76D6: \u672B\u4E16\u538B\u6291/\u5E9F\u571F\u8083\u6740/\u707E\u540E\u91CD\u5EFA/\u79D1\u6280\u51B0\u51B7 \u7B49\u60C5\u7EEA\u8BCD\u66FF\u6362\u5BAB\u5EF7\u534E\u8D35/\u5C71\u6C34\u610F\u5883/\u95FA\u9601\u6E29\u5A49/\u6B66\u4FA0\u8083\u6740/\u8282\u65E5\u559C\u5E86/\u6708\u591C\u6E05\u5E7D
-
-**\u4F55\u65F6\u751F\u6548**: \u672C override \u5728\u6240\u6709\u5206\u955C\u751F\u56FE / \u8D44\u4EA7\u751F\u56FE / \u89C6\u9891\u63D0\u793A\u8BCD\u751F\u6210 subAgent \u4E2D\u5747\u751F\u6548. \u5F53\u4EFB\u4F55\u827A\u672F\u98CE\u683C\u7EA6\u675F\u4E0E\u672C override \u51B2\u7A81\u65F6, **\u4EE5\u672C override \u4E3A\u51C6**.
-`;
-    prompt = prompt + typeOverride;
-  }
-  const res = {
-    prompt,
+${buildSkillPrompt(mainSkills)}`,
     tools: createSkillTools(mainSkills, { mainSkill: mainSkills, secondarySkills: [], tertiarySkills: [] })
   };
   return res;
@@ -257873,7 +257831,7 @@ function buildSkillPrompt(skills) {
 ${skillEntries}
 </available_skills>`;
 }
-async function useProductionSkills(artName, storyName, projectType) {
+async function useProductionSkills(artName, storyName) {
   const artWorkerPath = utils_default.getPath(["skills", "art_skills", artName, "driector_skills"]);
   const storyWorkerPath = utils_default.getPath(["skills", "story_skills", storyName, "driector_skills"]);
   const productionPath = utils_default.getPath(["skills", "production_skills"]);
@@ -257889,23 +257847,11 @@ async function useProductionSkills(artName, storyName, projectType) {
     const parsed = parseFrontmatter(content);
     mainSkills.push({ path: skillPath, ...parsed });
   }
-  let prompt = `## Skills
+  const res = {
+    prompt: `## Skills
 \u4EE5\u4E0B\u6280\u80FD\u63D0\u4F9B\u4E86\u4E13\u4E1A\u4EFB\u52A1\u7684\u4E13\u7528\u6307\u4EE4\u3002
 \u5F53\u4EFB\u52A1\u4E0E\u67D0\u4E2A\u6280\u80FD\u7684\u63CF\u8FF0\u5339\u914D\u65F6\uFF0C\u8C03\u7528 activate_skill \u5DE5\u5177\u5E76\u4F20\u5165\u6280\u80FD\u540D\u79F0\u6765\u52A0\u8F7D\u5B8C\u6574\u6307\u4EE4\u3002
-${buildSkillPrompt(mainSkills)}`;
-  const overrideTypes = ["\u672B\u4E16", "\u79D1\u5E7B", "\u73B0\u4EE3", "\u5E9F\u571F", "\u707E\u96BE", "\u8D5B\u535A", "\u90FD\u5E02"];
-  if (projectType && overrideTypes.some((t) => projectType.includes(t))) {
-    prompt = prompt + `
-
----
-
-## \u26A0\uFE0F \u9879\u76EE\u7C7B\u578B override \xB7 \u672B\u4E16/\u79D1\u5E7B/\u73B0\u4EE3/\u5E9F\u571F/\u707E\u96BE
-
-\u672C\u9879\u76EE\u7C7B\u578B\u4E3A \`${projectType}\`. \u5FFD\u7565 art_skills \u98CE\u683C\u6587\u4EF6\u91CC\u7684 R3 (\u4E2D\u56FD\u4F20\u7EDF\u8272\u5F69/\u4E1C\u65B9\u7F8E\u5B66) / R5 (\u56FD\u98CE3D\u7F8E\u5B66) / X3 (\u4E25\u7981\u897F\u65B9\u5947\u5E7B/\u8D5B\u535A\u670B\u514B/\u73B0\u4EE3\u5143\u7D20) / \u7F8E\u5B66\u7981\u6B62\u9879 (\u73B0\u4EE3\u5EFA\u7B51/\u73B0\u4EE3\u670D\u9970\u5143\u7D20) \u7EA6\u675F, \u5F3A\u5236\u4F7F\u7528\u672B\u4E16\u5E9F\u571F\u98CE\u683C: \`post-apocalyptic, ruined city, debris, ash, dust, smoke, weathered concrete, rusted metal, broken glass, modern ruins, sci-fi elements\`. \u4E25\u7981\u53E4\u98CE\u5EFA\u7B51/\u5BAB\u6BBF/\u6C49\u670D/\u4ED9\u4FA0/\u6B66\u4FA0. \u4FDD\u7559 3D\u6E32\u67D3/PBR\u6750\u8D28/\u7535\u5F71\u7EA7\u5149\u5F71\u8FD9\u4E9B\u6280\u672F\u8981\u6C42. \u672C override \u4E0E\u4E0A\u9762\u4EFB\u4F55\u827A\u672F\u98CE\u683C\u7EA6\u675F\u51B2\u7A81\u65F6, \u4EE5\u672C override \u4E3A\u51C6.
-`;
-  }
-  const res = {
-    prompt,
+${buildSkillPrompt(mainSkills)}`,
     tools: createSkillTools(mainSkills, { mainSkill: mainSkills, secondarySkills: [], tertiarySkills: [] })
   };
   return res;
