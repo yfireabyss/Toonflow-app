@@ -294,6 +294,21 @@ const vendor: VendorConfig = {
       ],
     },
     {
+      // 2026-08-15 v8 新增: 非对称首尾 (first 0.8 + last 1.0) - 兼顾戏剧性 + 末帧稳
+      // 适用: 7s 段 (v6 0.8 黑屏 vs v7 1.0 戏剧性消失 trade-off)
+      // first 0.8: 释放首段, 中段可"动" (戏剧性, 类似 soft 0.8)
+      // last 1.0: 锁死末帧, 跨段衔接稳 (类似 strong 1.0)
+      // 经验 14 验证假设: asymmetric = 戏剧性 + 末帧稳双拿
+      name: "LTX-2.3 真首尾帧-非对称 (first 0.8 + last 1.0)",
+      modelName: "ltx2.3-truly-startend-asymmetric",
+      type: "video",
+      mode: ["startEndRequired"],
+      audio: false,
+      durationResolutionMap: [
+        { duration: [5, 8, 10, 12, 15, 20, 25], resolution: ["480p", "720p"] },
+      ],
+    },
+    {
       name: "LTX-2.3 视频修复 (22B fp8 + SeedVR2)",
       modelName: "ltx2.3-repair",
       type: "video",
@@ -1198,6 +1213,40 @@ function buildLtx2_3TrulyStartEndStrong(prompt: string, width: number, height: n
   };
 }
 
+function buildLtx2_3TrulyStartEndAsymmetric(prompt: string, width: number, height: number, length: number, seed: number, startImg: string, endImg: string): any {
+  // 2026-08-15 v8 新增: 非对称首尾 (first 0.8 + last 1.0)
+  // 兼顾 v7 strong 1.0 的"无黑屏 + 末帧稳" + soft 0.8 的"中段戏剧性"
+  // first 0.8: 释放首段, 中段可"动" (戏剧性, 类似 soft)
+  // last 1.0: 锁死末帧, 跨段衔接稳 (类似 strong)
+  // 适用: 7s 段 (v6/v7 中段戏剧性 vs 黑屏 trade-off 痛点)
+  // 节点链: 22B fp8 + gemma + distilled lora + LTXVFirstLastFrameControl_TTP (首 0.8 末 1.0) + 20 步
+  return {
+    "1": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors" } },
+    "2": { class_type: "LTXAVTextEncoderLoader", inputs: { text_encoder: "gemma_3_12B_it_fpmixed.safetensors", ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors", device: "default" } },
+    "3": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: prompt } },
+    "4": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: NEGATIVE_VIDEO } },
+    "30": { class_type: "LoraLoaderModelOnly", inputs: { model: ["1", 0], lora_name: "ltx-2.3-22b-distilled-lora-384.safetensors", strength_model: 0.5 } },
+    "20": { class_type: "LoadImage", inputs: { image: startImg } },
+    "21": { class_type: "ImageScale", inputs: { image: ["20", 0], width, height, upscale_method: "lanczos", crop: "center" } },
+    "24": { class_type: "LoadImage", inputs: { image: endImg } },
+    "25": { class_type: "ImageScale", inputs: { image: ["24", 0], width, height, upscale_method: "lanczos", crop: "center" } },
+    "5": { class_type: "EmptyLTXVLatentVideo", inputs: { width, height, length, batch_size: 1 } },
+    "23": { class_type: "LTXVFirstLastFrameControl_TTP", inputs: { vae: ["1", 2], latent: ["5", 0], first_strength: 0.8, last_strength: 1.0, first_image: ["21", 0], last_image: ["25", 0] } },
+    "7": { class_type: "LTXVScheduler", inputs: { steps: 20, max_shift: 2.05, base_shift: 0.95, stretch: true, terminal: 0.1 } },
+    "8": { class_type: "KSamplerSelect", inputs: { sampler_name: "euler" } },
+    "9": {
+      class_type: "SamplerCustom",
+      inputs: {
+        model: ["30", 0], positive: ["3", 0], negative: ["4", 0],
+        sampler: ["8", 0], sigmas: ["7", 0], latent_image: ["23", 0],
+        add_noise: true, noise_seed: seed, cfg: 3.0,
+      },
+    },
+    "10": { class_type: "VAEDecode", inputs: { samples: ["9", 0], vae: ["1", 2] } },
+    "11": { class_type: "VHS_VideoCombine", inputs: { images: ["10", 0], frame_rate: 24, loop_count: 0, filename_prefix: "toonflow_truly_startend_asymmetric", format: "video/h264-mp4", pingpong: false, save_output: true } },
+  };
+}
+
 function buildLtx2_3Repair(prompt: string, width: number, height: number, length: number, seed: number, refImage: string): any {
   // LTX 22B fp8 图生视频(修复/重生片段)
   // 2026-08-14 修复: 原实现首帧图从未进入 latent(假 i2v), 改为 LTXVImgToVideo 真 i2v
@@ -1820,6 +1869,11 @@ const videoRequest = async (config: VideoConfig, model: VideoModel): Promise<str
       // 2026-08-15 v7: 强首尾 1.0, 锁死首末
       if (!startImg || !endImg) throw new Error("ltx2.3-truly-startend-strong 需要首尾图 (startImg + endImg)");
       wf = buildLtx2_3TrulyStartEndStrong(config.prompt, w, h, length, seed, startImg, endImg);
+      break;
+    case "ltx2.3-truly-startend-asymmetric":
+      // 2026-08-15 v8: 非对称首尾 (first 0.8 + last 1.0)
+      if (!startImg || !endImg) throw new Error("ltx2.3-truly-startend-asymmetric 需要首尾图 (startImg + endImg)");
+      wf = buildLtx2_3TrulyStartEndAsymmetric(config.prompt, w, h, length, seed, startImg, endImg);
       break;
     case "ltx2.3-repair":
       if (!startImg) throw new Error("ltx2.3-repair 需要单图参考");
