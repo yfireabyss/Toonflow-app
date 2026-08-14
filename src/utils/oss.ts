@@ -66,8 +66,8 @@ class OSS {
       const ctxHost = requestContext.getStore()?.host;
       if (ctxHost) {
         // 走当前请求的 host（远端访问正确返回 pc.fireyy.me:10588 而不是 localhost:10588）
-        const protocol = process.env.NODE_ENV === "production" ? "https" : "http";
-        url = `${protocol}://${ctxHost}/${prefix}/`;
+        // ctxHost 已经是 `http(s)://host` 完整形式，直接用
+        url = `${ctxHost}/${prefix}/`;
       } else if (process.env.NODE_ENV == "dev") {
         url = `http://localhost:10588/${prefix}/`;
       } else if (isEletron()) {
