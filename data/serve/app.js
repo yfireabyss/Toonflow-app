@@ -257555,7 +257555,7 @@ ${modelInfo}` },
     execute: async ({ prompt }) => {
       const skill = import_path10.default.join(utils_default.getPath("skills"), "production_execution_director_plan.md");
       const systemPrompt = await fs11.promises.readFile(skill, "utf-8");
-      const addPrompt = "\n\u4F60\u5FC5\u987B\u4F7F\u7528\u5982\u4E0BXML\u683C\u5F0F\u5199\u5165\u5DE5\u4F5C\u533A\uFF1A\n```\n<scriptPlan>\u5185\u5BB9</scriptPlan>\n```";
+      const addPrompt = "\n\u3010\u5173\u952E\u3011\u628A\u5B8C\u6574\u62CD\u6444\u8BA1\u5212\u5199\u5165\u5DE5\u4F5C\u533A\uFF1A\u5C06\u62CD\u6444\u8BA1\u5212 Markdown\uFF08\u5206\u573A\u6C47\u603B\u8868 + \u9010\u573A\u6CE8\u610F\u4E8B\u9879\uFF09\u5305\u88F9\u5728 <scriptPlan> \u6807\u7B7E\u5185\u3002\n\u6807\u7B7E\u5185\u5FC5\u987B\u662F\u5B8C\u6574\u5185\u5BB9\u672C\u8EAB\uFF0C\u7981\u6B62\u5199'\u5185\u5BB9'\u4E8C\u5B57\u5360\u4F4D\u3002\u793A\u4F8B\u683C\u5F0F\uFF1A\n```\n<scriptPlan>\n### \u5206\u573A\u6C47\u603B\u8868\n| \u573A\u6B21 | \u573A\u666F\u540D | \u53F0\u8BCD\u6761\u6570 | ... |\n...\u5B8C\u6574\u8868\u683C...\n</scriptPlan>\n```";
       return runAgent({
         key: "productionAgent:directorPlanAgent",
         prompt,
@@ -257599,7 +257599,7 @@ ${modelInfo}` },
     execute: async ({ prompt }) => {
       const skill = import_path10.default.join(utils_default.getPath("skills"), "production_execution_storyboard_panel.md");
       const systemPrompt = await fs11.promises.readFile(skill, "utf-8");
-      const addPrompt = "\n\u4F60\u5FC5\u987B\u4F7F\u7528\u5982\u4E0BXML\u683C\u5F0F\u5199\u5165\u5DE5\u4F5C\u533A\uFF1A\n```\n<storyboardItem videoDesc='\u89C6\u9891\u63CF\u8FF0' prompt=\u63D0\u793A\u8BCD\u5185\u5BB9 track='\u5206\u7EC4' shouldGenerateImage='true/false' duration='\u89C6\u9891\u63A8\u8350\u65F6\u95F4' associateAssetsIds='[\u8BE5\u5206\u955C\u6240\u9700\u7684\u8D44\u4EA7ID\u5217\u8868]'></storyboardItem>\n```";
+      const addPrompt = "\n\u3010\u5173\u952E\u3011\u628A\u5206\u955C\u9762\u677F\u5199\u5165\u5DE5\u4F5C\u533A\uFF1A\u6BCF\u4E2A\u5206\u955C\u4E00\u6761 <storyboardItem>\uFF0C\u5C5E\u6027\u503C\u5FC5\u987B\u662F\u672C\u7247\u771F\u5B9E\u5185\u5BB9\uFF0C\u7981\u6B62\u7167\u6284\u793A\u4F8B\u5360\u4F4D\u6587\u5B57\uFF08\u5982'\u89C6\u9891\u63CF\u8FF0'/'\u63D0\u793A\u8BCD\u5185\u5BB9'/'\u5206\u7EC4'/'\u89C6\u9891\u63A8\u8350\u65F6\u95F4'\uFF09\u3002\n\u793A\u4F8B\u683C\u5F0F\uFF1A\n```\n<storyboardItem videoDesc='\u771F\u5B9E\u7684\u753B\u9762\u63CF\u8FF0' prompt='\u771F\u5B9E\u7684\u751F\u6210\u63D0\u793A\u8BCD' track='\u5206\u7EC4\u540D' shouldGenerateImage='true' duration='5' associateAssetsIds='[1,2,3]'></storyboardItem>\n```";
       return runAgent({
         key: "productionAgent:storyboardPanelAgent",
         prompt,
@@ -257621,7 +257621,7 @@ ${modelInfo}` },
     execute: async ({ prompt }) => {
       const skill = import_path10.default.join(utils_default.getPath("skills"), "production_execution_storyboard_table.md");
       const systemPrompt = await fs11.promises.readFile(skill, "utf-8");
-      const addPrompt = "\n\u4F60\u5FC5\u987B\u4F7F\u7528\u5982\u4E0BXML\u683C\u5F0F\u5199\u5165\u5DE5\u4F5C\u533A\uFF1A\n```\n<storyboardTable>\u5185\u5BB9</storyboardTable>\n```";
+      const addPrompt = "\n\u3010\u5173\u952E\u3011\u628A\u5B8C\u6574\u5206\u955C\u8868\u5199\u5165\u5DE5\u4F5C\u533A\uFF1A\u5C06\u5206\u955C\u8868 Markdown\uFF08\u573A\u5934/\u7247\u6BB5/\u6BCF\u955C\u7684\u753B\u9762\u63CF\u8FF0/\u65F6\u957F/\u666F\u522B/\u8FD0\u955C/\u53F0\u8BCD/\u97F3\u6548/\u5F15\u7528\u8D44\u4EA7\u540D\u79F0\u4E0EID\uFF09\u5305\u88F9\u5728 <storyboardTable> \u6807\u7B7E\u5185\u3002\n\u6807\u7B7E\u5185\u5FC5\u987B\u662F\u5B8C\u6574\u5185\u5BB9\u672C\u8EAB\uFF0C\u7981\u6B62\u5199'\u5185\u5BB9'\u4E8C\u5B57\u5360\u4F4D\u3002\u793A\u4F8B\u683C\u5F0F\uFF1A\n```\n<storyboardTable>\n## \u573A1\uFF1A\u573A\u666F\u540D \uFF5C \u53C2\u6F14\u89D2\u8272\uFF1A...\n\n### \u7247\u6BB5\u4E00\uFF08\u7EA6Xs\uFF09\n**\u5F15\u7528\u8D44\u4EA7\u540D\u79F0**\uFF1A[...]\n**\u5F15\u7528\u8D44\u4EA7ID**\uFF1A[...]\n| \u5E8F\u53F7 | \u753B\u9762\u63CF\u8FF0 | \u65F6\u957F | \u666F\u522B | \u8FD0\u955C | \u53F0\u8BCD | \u97F3\u6548 |\n...\u5B8C\u6574\u8868\u683C...\n</storyboardTable>\n```";
       return runAgent({
         key: "productionAgent:storyboardTableAgent",
         prompt,
@@ -257734,18 +257734,33 @@ function removeAllXmlTags(text2) {
   text2 = text2.replace(/<\/?[a-zA-Z][\w-]*(\s+[^>]*)?>/g, "");
   return text2.trim();
 }
+function isValidPersistContent(content) {
+  if (!content || content.length < 20) return false;
+  if (/^(内容|此处填写|占位|待填|待补充|TODO|xxx|...|\s*)$/.test(content.trim())) return false;
+  return true;
+}
 async function autoPersistSubAgentOutput(projectId, scriptId, text2) {
   const saved = [];
   try {
     const spMatch = text2.match(/<scriptPlan>([\s\S]*?)<\/scriptPlan>/);
     if (spMatch) {
-      await upsertAgentWorkData(projectId, scriptId, "productionAgent", "scriptPlan", spMatch[1].trim());
-      saved.push(`scriptPlan(${spMatch[1].trim().length})`);
+      const content = spMatch[1].trim();
+      if (isValidPersistContent(content)) {
+        await upsertAgentWorkData(projectId, scriptId, "productionAgent", "scriptPlan", content);
+        saved.push(`scriptPlan(${content.length})`);
+      } else {
+        console.warn(`[productionAgent autoPersist] scriptPlan \u7591\u4F3C\u5360\u4F4D\u5185\u5BB9(len=${content.length}): "${content.slice(0, 20)}", \u8DF3\u8FC7\u5199\u5165\u907F\u514D\u8986\u76D6`);
+      }
     }
     const stMatch = text2.match(/<storyboardTable>([\s\S]*?)<\/storyboardTable>/);
     if (stMatch) {
-      await upsertAgentWorkData(projectId, scriptId, "productionAgent", "storyboardTable", stMatch[1].trim());
-      saved.push(`storyboardTable(${stMatch[1].trim().length})`);
+      const content = stMatch[1].trim();
+      if (isValidPersistContent(content)) {
+        await upsertAgentWorkData(projectId, scriptId, "productionAgent", "storyboardTable", content);
+        saved.push(`storyboardTable(${content.length})`);
+      } else {
+        console.warn(`[productionAgent autoPersist] storyboardTable \u7591\u4F3C\u5360\u4F4D\u5185\u5BB9(len=${content.length}): "${content.slice(0, 20)}", \u8DF3\u8FC7\u5199\u5165\u907F\u514D\u8986\u76D6`);
+      }
     }
     const sbRegex = /<storyboardItem\b([^>]*?)\/?>(?:[\s\S]*?<\/storyboardItem>)?/g;
     const sbList = [];
@@ -257771,7 +257786,10 @@ async function autoPersistSubAgentOutput(projectId, scriptId, text2) {
         }
       }
       if (obj.videoDesc || obj.prompt) {
-        sbList.push(obj);
+        const vDesc = String(obj.videoDesc || "");
+        const vPrompt = String(obj.prompt || "");
+        const isPlaceholder = /^(视频描述|提示词内容|分组|视频推荐时间|真实.*)$/.test(vDesc.trim()) || /^(提示词内容|视频描述|真实.*)$/.test(vPrompt.trim());
+        if (!isPlaceholder) sbList.push(obj);
       }
     }
     if (sbList.length) {

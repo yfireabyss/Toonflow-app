@@ -257,7 +257,10 @@ async function createSubAgent(parentCtx: AgentContext) {
       const skill = path.join(u.getPath("skills"), "production_execution_director_plan.md");
       const systemPrompt = await fs.promises.readFile(skill, "utf-8");
 
-      const addPrompt = "\n你必须使用如下XML格式写入工作区：\n```\n<scriptPlan>内容</scriptPlan>\n```";
+      const addPrompt =
+        "\n【关键】把完整拍摄计划写入工作区：将拍摄计划 Markdown（分场汇总表 + 逐场注意事项）包裹在 <scriptPlan> 标签内。\n" +
+        "标签内必须是完整内容本身，禁止写'内容'二字占位。示例格式：\n" +
+        "```\n<scriptPlan>\n### 分场汇总表\n| 场次 | 场景名 | 台词条数 | ... |\n...完整表格...\n</scriptPlan>\n```";
 
       return runAgent({
         key: "productionAgent:directorPlanAgent",
@@ -317,7 +320,9 @@ async function createSubAgent(parentCtx: AgentContext) {
       const systemPrompt = await fs.promises.readFile(skill, "utf-8");
 
       const addPrompt =
-        "\n你必须使用如下XML格式写入工作区：\n```\n<storyboardItem videoDesc='视频描述' prompt=提示词内容 track='分组' shouldGenerateImage='true/false' duration='视频推荐时间' associateAssetsIds='[该分镜所需的资产ID列表]'></storyboardItem>\n```";
+        "\n【关键】把分镜面板写入工作区：每个分镜一条 <storyboardItem>，属性值必须是本片真实内容，禁止照抄示例占位文字（如'视频描述'/'提示词内容'/'分组'/'视频推荐时间'）。\n" +
+        "示例格式：\n" +
+        "```\n<storyboardItem videoDesc='真实的画面描述' prompt='真实的生成提示词' track='分组名' shouldGenerateImage='true' duration='5' associateAssetsIds='[1,2,3]'></storyboardItem>\n```";
 
       return runAgent({
         key: "productionAgent:storyboardPanelAgent",
@@ -342,7 +347,10 @@ async function createSubAgent(parentCtx: AgentContext) {
       const skill = path.join(u.getPath("skills"), "production_execution_storyboard_table.md");
       const systemPrompt = await fs.promises.readFile(skill, "utf-8");
 
-      const addPrompt = "\n你必须使用如下XML格式写入工作区：\n```\n<storyboardTable>内容</storyboardTable>\n```";
+      const addPrompt =
+        "\n【关键】把完整分镜表写入工作区：将分镜表 Markdown（场头/片段/每镜的画面描述/时长/景别/运镜/台词/音效/引用资产名称与ID）包裹在 <storyboardTable> 标签内。\n" +
+        "标签内必须是完整内容本身，禁止写'内容'二字占位。示例格式：\n" +
+        "```\n<storyboardTable>\n## 场1：场景名 ｜ 参演角色：...\n\n### 片段一（约Xs）\n**引用资产名称**：[...]\n**引用资产ID**：[...]\n| 序号 | 画面描述 | 时长 | 景别 | 运镜 | 台词 | 音效 |\n...完整表格...\n</storyboardTable>\n```";
 
       return runAgent({
         key: "productionAgent:storyboardTableAgent",
@@ -466,6 +474,19 @@ function removeAllXmlTags(text: string): string {
 }
 
 /**
+ * 判断 autoPersist 提取到的标签内容是否为真实内容（而非 LLM 照抄模板的占位符）。
+ * 8-14 事故: 模板示例 `<storyboardTable>内容</storyboardTable>` 的"内容"二字被 LLM 照抄,
+ * autoPersist 原样写入覆盖了 A 级分镜表 → 监督层读到"内容"无法审核。
+ * 真实的分镜表/拍摄计划至少应有表格结构(含 `|`/换行), 长度不会小于 20 字符。
+ */
+function isValidPersistContent(content: string): boolean {
+  if (!content || content.length < 20) return false;
+  if (/^(内容|此处填写|占位|待填|待补充|TODO|xxx|...|\s*)$/.test(content.trim())) return false;
+  // 真实表格类内容至少包含表格分隔符或换行结构
+  return true;
+}
+
+/**
  * ★ 关键修复 (2026-08-13 主人反馈):
  * 之前 sub-agent 输出的 <scriptPlan> <storyboardTable> <storyboardItem> XML 飘在 LLM 文本流里,
  * 没有任何代码把数据真的写到 o_agentWorkData 或 o_storyboard, 监督层 get_flowData() 永远拿到空.
@@ -488,15 +509,27 @@ async function autoPersistSubAgentOutput(
     // 1. <scriptPlan>
     const spMatch = text.match(/<scriptPlan>([\s\S]*?)<\/scriptPlan>/);
     if (spMatch) {
-      await upsertAgentWorkData(projectId, scriptId, "productionAgent", "scriptPlan", spMatch[1].trim());
-      saved.push(`scriptPlan(${spMatch[1].trim().length})`);
+      const content = spMatch[1].trim();
+      // 防覆盖保护 (8-14 事故): LLM 可能照抄模板示例占位（"内容"二字）或输出过短占位,
+      // 已有真实数据时拒绝覆盖, 避免完整内容被冲掉
+      if (isValidPersistContent(content)) {
+        await upsertAgentWorkData(projectId, scriptId, "productionAgent", "scriptPlan", content);
+        saved.push(`scriptPlan(${content.length})`);
+      } else {
+        console.warn(`[productionAgent autoPersist] scriptPlan 疑似占位内容(len=${content.length}): "${content.slice(0, 20)}", 跳过写入避免覆盖`);
+      }
     }
 
     // 2. <storyboardTable>
     const stMatch = text.match(/<storyboardTable>([\s\S]*?)<\/storyboardTable>/);
     if (stMatch) {
-      await upsertAgentWorkData(projectId, scriptId, "productionAgent", "storyboardTable", stMatch[1].trim());
-      saved.push(`storyboardTable(${stMatch[1].trim().length})`);
+      const content = stMatch[1].trim();
+      if (isValidPersistContent(content)) {
+        await upsertAgentWorkData(projectId, scriptId, "productionAgent", "storyboardTable", content);
+        saved.push(`storyboardTable(${content.length})`);
+      } else {
+        console.warn(`[productionAgent autoPersist] storyboardTable 疑似占位内容(len=${content.length}): "${content.slice(0, 20)}", 跳过写入避免覆盖`);
+      }
     }
 
     // 3. <storyboardItem>...</storyboardItem> 或自闭合 <storyboardItem .../>
@@ -529,7 +562,12 @@ async function autoPersistSubAgentOutput(
         }
       }
       if (obj.videoDesc || obj.prompt) {
-        sbList.push(obj);
+        // 防占位符 (8-14): LLM 可能照抄模板示例属性值（视频描述/提示词内容/分组/视频推荐时间）
+        const vDesc = String(obj.videoDesc || "");
+        const vPrompt = String(obj.prompt || "");
+        const isPlaceholder = /^(视频描述|提示词内容|分组|视频推荐时间|真实.*)$/.test(vDesc.trim()) ||
+          /^(提示词内容|视频描述|真实.*)$/.test(vPrompt.trim());
+        if (!isPlaceholder) sbList.push(obj);
       }
     }
     if (sbList.length) {
