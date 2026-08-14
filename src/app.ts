@@ -15,6 +15,7 @@ import jwt from "jsonwebtoken";
 import socketInit from "@/socket/index";
 import { isEletron } from "@/utils/getPath";
 import { ensureThumbnail, ThumbnailSize } from "@/utils/image";
+import { requestContext } from "@/utils/oss";
 
 const app = express();
 const server = http.createServer(app);
@@ -58,6 +59,14 @@ export default async function startServe(randomPort: Boolean = false) {
   app.use(cors({ origin: "*" }));
   app.use(express.json({ limit: "100mb" }));
   app.use(express.urlencoded({ extended: true, limit: "100mb" }));
+
+  // 把当前请求的 host 注入 AsyncLocalStorage，让 oss.ts getFileUrl 能拼出正确的 URL
+  // 修复：远端浏览器 (pc.fireyy.me) 访问时，oss.ts 不再 hardcode localhost:10588
+  app.use((req, _res, next) => {
+    const proto = (req.headers["x-forwarded-proto"] as string) || "http";
+    const host = req.headers.host;
+    requestContext.run({ host: host ? `${proto}://${host}` : undefined }, () => next());
+  });
 
   // oss 静态资源
   const ossDir = u.getPath("oss");

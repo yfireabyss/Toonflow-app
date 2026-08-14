@@ -116241,7 +116241,7 @@ function resolveSafeLocalPath(userPath, rootDir) {
   }
   return absPath;
 }
-var import_promises3, import_node_path2, OSS, oss_default;
+var import_promises3, import_node_path2, import_node_async_hooks, requestContext, OSS, oss_default;
 var init_oss = __esm({
   "src/utils/oss.ts"() {
     "use strict";
@@ -116249,6 +116249,8 @@ var init_oss = __esm({
     init_getPath();
     import_promises3 = __toESM(require("node:fs/promises"));
     import_node_path2 = __toESM(require("node:path"));
+    import_node_async_hooks = require("node:async_hooks");
+    requestContext = new import_node_async_hooks.AsyncLocalStorage();
     OSS = class {
       rootDir;
       initPromise;
@@ -116274,9 +116276,19 @@ var init_oss = __esm({
         await this.ensureInit();
         const safePath = normalizeUserPath(userRelPath);
         let url4 = `/${prefix}/`;
-        if (process.env.ossURL && process.env.ossURL !== "") url4 = process.env.ossURL + `/${prefix}/`;
-        if (process.env.NODE_ENV == "dev") url4 = `http://localhost:10588/${prefix}/`;
-        if (isEletron()) url4 = `http://localhost:${process.env.PORT}/${prefix}/`;
+        if (process.env.ossURL && process.env.ossURL !== "") {
+          url4 = process.env.ossURL + `/${prefix}/`;
+        } else {
+          const ctxHost = requestContext.getStore()?.host;
+          if (ctxHost) {
+            const protocol = process.env.NODE_ENV === "production" ? "https" : "http";
+            url4 = `${protocol}://${ctxHost}/${prefix}/`;
+          } else if (process.env.NODE_ENV == "dev") {
+            url4 = `http://localhost:10588/${prefix}/`;
+          } else if (isEletron()) {
+            url4 = `http://localhost:${process.env.PORT}/${prefix}/`;
+          }
+        }
         return `${url4}${safePath.split(import_node_path2.default.sep).join("/")}`;
       }
       /**
@@ -259047,6 +259059,7 @@ async function ensureThumbnail(originalPath, thumbnailPath, size) {
 }
 
 // src/app.ts
+init_oss();
 var app = (0, import_express170.default)();
 var server = import_node_http.default.createServer(app);
 async function checkPermissions() {
@@ -259086,6 +259099,11 @@ async function startServe(randomPort = false) {
   app.use((0, import_cors.default)({ origin: "*" }));
   app.use(import_express170.default.json({ limit: "100mb" }));
   app.use(import_express170.default.urlencoded({ extended: true, limit: "100mb" }));
+  app.use((req, _res, next) => {
+    const proto = req.headers["x-forwarded-proto"] || "http";
+    const host = req.headers.host;
+    requestContext.run({ host: host ? `${proto}://${host}` : void 0 }, () => next());
+  });
   const ossDir = utils_default.getPath("oss");
   if (!import_fs19.default.existsSync(ossDir)) {
     import_fs19.default.mkdirSync(ossDir, { recursive: true });

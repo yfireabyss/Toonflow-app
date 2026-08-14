@@ -3,6 +3,13 @@ import getPath, { isEletron } from "@/utils/getPath";
 import fs from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
+import { AsyncLocalStorage } from "node:async_hooks";
+
+/**
+ * 请求级 host 存储：通过 express middleware 注入当前请求的 host，
+ * oss.ts 拼 URL 时从这里取（避免 hardcode localhost:10588 让远端访问失败）
+ */
+export const requestContext = new AsyncLocalStorage<{ host?: string }>();
 
 // 规范化路径：去除前导斜杠，并将路径分隔符统一转换为系统分隔符
 function normalizeUserPath(userPath: string): string {
@@ -51,10 +58,22 @@ class OSS {
     await this.ensureInit();
     const safePath = normalizeUserPath(userRelPath);
     // URL 始终使用 /，所以这里需要将系统分隔符转回 /
+    // 优先级：process.env.ossURL > 当前请求 host (从 AsyncLocalStorage) > dev/Electron hardcode localhost
     let url = `/${prefix}/`;
-    if (process.env.ossURL && process.env.ossURL !== "") url = process.env.ossURL + `/${prefix}/`;
-    if (process.env.NODE_ENV == "dev") url = `http://localhost:10588/${prefix}/`;
-    if (isEletron()) url = `http://localhost:${process.env.PORT}/${prefix}/`;
+    if (process.env.ossURL && process.env.ossURL !== "") {
+      url = process.env.ossURL + `/${prefix}/`;
+    } else {
+      const ctxHost = requestContext.getStore()?.host;
+      if (ctxHost) {
+        // 走当前请求的 host（远端访问正确返回 pc.fireyy.me:10588 而不是 localhost:10588）
+        const protocol = process.env.NODE_ENV === "production" ? "https" : "http";
+        url = `${protocol}://${ctxHost}/${prefix}/`;
+      } else if (process.env.NODE_ENV == "dev") {
+        url = `http://localhost:10588/${prefix}/`;
+      } else if (isEletron()) {
+        url = `http://localhost:${process.env.PORT}/${prefix}/`;
+      }
+    }
     return `${url}${safePath.split(path.sep).join("/")}`;
   }
 
