@@ -447,11 +447,16 @@ function newSeed(): number {
 // ---- IMAGE BUILDERS ----
 
 function buildSdxlT2i(prompt: string, width: number, height: number, seed: number): any {
-  // 2026-08-13: 启用完整 SDXL base+refiner 双 KSampler 链
-  // 之前只用 base (注释 "避免 shape 不匹配" 是早期妥协), 现在 refiner 已装回 (sd_xl_refiner_1.0.safetensors 6GB)
+  // 2026-08-14: 修复 refiner shape 不匹配 — refiner 必须用自己的 CLIP 重新编码
+  // 之前 (8-13 双链版): refiner KSampler 吃 base 的 CLIP 输出 (2048 dim = ViT-L 768 + OpenCLIP 1280)
+  // 但 SDXL refiner UNet 只接受 OpenCLIP 的 1280 dim → ComfyUI 崩:
+  //   "mat1 and mat2 shapes cannot be multiplied (462x2048 and 1280x768)"
+  // 修复: 新增节点 10/11 (refiner 自己 CLIP 编码), KSampler 7 positive/negative 改吃 ["10"/"11", 0]
+  // 直连 ComfyUI 实测 33s 出图成功 (2026-08-14)
   // 链路: base 25 步 (denoise=1) 出基础 latent → refiner 20 步 (denoise=0.2) 细化 → VAEDecode → SaveImage
-  //   - 两 stage 共享 positive/negative CLIP (都从 base 编码)
-  //   - refiner 的 model 来自 refiner checkpoint, vae 仍用 base 的 (refiner 不带独立 vae)
+  //   - base CLIP (节点3/4) 只喂 base KSampler (节点6)
+  //   - refiner CLIP (节点10/11) 只喂 refiner KSampler (节点7)
+  //   - refiner 的 vae 仍用 base 的 (refiner 不带独立 vae)
   //   - 显存 ~13-15GB (base 6.5 + refiner 6 + 临时), 16GB 满载; 150W 功耗墙下 ~25-30s/张
   return {
     "1": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "sd_xl_base_1.0.safetensors" } },
@@ -466,10 +471,12 @@ function buildSdxlT2i(prompt: string, width: number, height: number, seed: numbe
         seed, steps: 25, cfg: 7, sampler_name: "euler", scheduler: "normal", denoise: 1.0,
       },
     },
+    "10": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 1], text: prompt } },
+    "11": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 1], text: NEGATIVE_DEFAULT } },
     "7": {
       class_type: "KSampler",
       inputs: {
-        model: ["2", 0], positive: ["3", 0], negative: ["4", 0], latent_image: ["6", 0],
+        model: ["2", 0], positive: ["10", 0], negative: ["11", 0], latent_image: ["6", 0],
         seed, steps: 20, cfg: 7, sampler_name: "euler", scheduler: "normal", denoise: 0.2,
       },
     },
@@ -803,14 +810,11 @@ function buildLtx2_3T2vFull(prompt: string, width: number, height: number, lengt
 }
 
 function buildLtx2_3I2vNvfp4(prompt: string, width: number, height: number, length: number, seed: number, refImage: string): any {
-  // 满血 LTX-2.3 22B fp8 + gemma + LTXVImgToVideo 真 i2v
-  // 2026-08-14 第二次升级: 从 nvfp4+8步+strength 1.0 改为 fp8 满血 + 20 步 + strength 0.7
-  //   - nvfp4 量化牺牲时序一致性, 运动画面易"定格 GIF"感
-  //   - 8 步 + strength 1.0 让模型太自由, 首帧参考弱
-  //   - 20 步 + 0.7 平衡: 保留首帧 70% 锚定 + 充分步数做时序动作
+  // LTX-2.3 22B nvfp4 + gemma + LTXVImgToVideo 真 i2v
+  // 函数名=权重, nvfp4 版本保持低显存快速档
   return {
-    "1": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors" } },
-    "2": { class_type: "LTXAVTextEncoderLoader", inputs: { text_encoder: "gemma_3_12B_it_fpmixed.safetensors", ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors", device: "default" } },
+    "1": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "ltx-2.3-22b-dev-nvfp4.safetensors" } },
+    "2": { class_type: "LTXAVTextEncoderLoader", inputs: { text_encoder: "gemma_3_12B_it_fpmixed.safetensors", ckpt_name: "ltx-2.3-22b-dev-nvfp4.safetensors", device: "default" } },
     "3": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: prompt } },
     "4": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: NEGATIVE_VIDEO } },
     "20": { class_type: "LoadImage", inputs: { image: refImage } },
