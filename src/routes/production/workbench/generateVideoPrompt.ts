@@ -166,8 +166,23 @@ export default router.post(
     }
 
     const artStyle = projectData?.artStyle || "无";
+    const projectType = (projectData as any)?.type || "";
 
-    const visualManual = u.getArtPrompt(artStyle, "art_skills", "art_storyboard_video");
+    let visualManual = u.getArtPrompt(artStyle, "art_skills", "art_storyboard_video");
+
+    // 8-14 临时 override: 末世/科幻/现代/废土/灾难项目, 忽略 art_storyboard_video.md 里的
+    // "Chinese traditional 3D render / 国风3D渲染" 风格标签, 强制注入末世废土/科幻风格.
+    const overrideTypes = ["末世", "科幻", "现代", "废土", "灾难", "赛博", "都市"];
+    if (projectType && overrideTypes.some((t) => projectType.includes(t))) {
+      visualManual = visualManual + `
+
+---
+
+## ⚠️ 项目类型 override · 末世/科幻/现代/废土/灾难
+
+本项目类型为 \`${projectType}\`. **忽略** 上面艺术风格约束里所有"国风3D渲染 / Chinese traditional 3D render / 东方美学 / 国风3D美学"标签, 改为输出: \`post-apocalyptic, ruined city, debris, ash, dust, smoke, weathered concrete, rusted metal, modern ruins, cinematic, shallow depth of field\`. 严禁古风/宫殿/汉服/仙侠. 保留 cinematic / PBR / 体积光 这些技术性视觉词. 本 override 与风格约束冲突时, 以本 override 为准.
+`;
+    }
     const storyboardContext = storyboard
       .map((i: any) => {
         const prevDesc = (i.prevStoryboards || [])
