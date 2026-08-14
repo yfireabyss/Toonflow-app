@@ -257098,7 +257098,7 @@ var posterItemSchema = external_exports.object({
 var flowDataSchema = external_exports.object({
   script: external_exports.string().describe("\u5267\u672C\u5185\u5BB9"),
   scriptPlan: external_exports.string().describe("\u62CD\u6444\u8BA1\u5212"),
-  assets: external_exports.array(assetItemSchema).describe("\u884D\u751F\u8D44\u4EA7"),
+  assets: external_exports.array(assetItemSchema).describe("\u5168\u90E8\u8D44\u4EA7\uFF08\u57FA\u7840+\u884D\u751F\uFF1B\u57FA\u7840\u8D44\u4EA7\u7684 derive \u4E3A\u7A7A\u6570\u7EC4\uFF0C\u884D\u751F\u8D44\u4EA7\u7684 assetsId \u5B57\u6BB5\u6307\u5411\u7236\u8D44\u4EA7 ID\uFF09"),
   storyboardTable: external_exports.string().describe("\u5206\u955C\u8868"),
   storyboard: external_exports.array(storyboardSchema).describe("\u5206\u955C\u9762\u677F")
 });
@@ -257116,6 +257116,50 @@ function createSocketQueue(delayMs = 800) {
     );
     return lastPromise;
   };
+}
+async function loadAssetsFromDb(scriptId) {
+  if (!scriptId) return [];
+  const rows = await utils_default.db("o_assets").leftJoin("o_scriptAssets", "o_assets.id", "o_scriptAssets.assetId").leftJoin("o_image", "o_assets.imageId", "o_image.id").where("o_scriptAssets.scriptId", scriptId).select(
+    "o_assets.id",
+    "o_assets.name",
+    "o_assets.type",
+    "o_assets.prompt",
+    "o_assets.describe as desc",
+    "o_assets.assetsId as parentAssetId",
+    "o_assets.remark",
+    "o_image.filePath as src"
+  ).orderBy("o_assets.id", "asc");
+  if (!rows.length) return [];
+  const baseById = {};
+  const childrenByParent = {};
+  for (const r of rows) {
+    const item = {
+      id: r.id,
+      name: r.name,
+      type: r.type,
+      prompt: r.prompt ?? "",
+      desc: r.desc ?? "",
+      src: r.src ?? null
+    };
+    if (r.parentAssetId == null) {
+      baseById[r.id] = { ...item, derive: [] };
+    } else {
+      if (!childrenByParent[r.parentAssetId]) childrenByParent[r.parentAssetId] = [];
+      childrenByParent[r.parentAssetId].push(item);
+    }
+  }
+  for (const parentId of Object.keys(childrenByParent)) {
+    const parent = baseById[Number(parentId)];
+    if (parent) {
+      parent.derive = childrenByParent[Number(parentId)];
+    } else {
+      for (const child of childrenByParent[Number(parentId)]) {
+        child.derive = [];
+        baseById[`orphan_${child.id}`] = child;
+      }
+    }
+  }
+  return Object.values(baseById);
 }
 var tools_default = (toolCpnfig) => {
   const { resTool, toolsNames, msg } = toolCpnfig;
@@ -257169,6 +257213,9 @@ var tools_default = (toolCpnfig) => {
             })),
             workbench: { videoList: [] }
           };
+        }
+        if (key === "assets") {
+          flowData.assets = await loadAssetsFromDb(scriptId);
         }
         thinking.appendText(`\u83B7\u53D6\u5230${flowDataKeyLabels[key]}(len=${JSON.stringify(flowData[key]).length}):
 ` + JSON.stringify(flowData[key], null, 2).slice(0, 800));
