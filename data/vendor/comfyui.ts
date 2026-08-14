@@ -308,6 +308,116 @@ const vendor: VendorConfig = {
         { duration: [5, 8, 10, 12, 15], resolution: ["480p", "720p"] },
       ],
     },
+    // ============================================================
+    // 2026-08-15 mavis phase12: 12 个新工作流登记
+    // ============================================================
+    // ---- A 档 (5 个, 已砍掉 hunyuan-i2v-720p) ----
+    {
+      name: "LTX-2.3 AV-LoRA talking-head (22B + 音频驱动说话)",
+      modelName: "ltx2.3-av-talking-head",
+      type: "video",
+      mode: ["audioReference", "singleImage"],
+      audio: false,
+      durationResolutionMap: [
+        { duration: [5, 8, 10, 12], resolution: ["480p", "720p"] },
+      ],
+    },
+    {
+      name: "LTX-2.3 transition 转场 (22B + transition LoRA + zhuanchang)",
+      modelName: "ltx2.3-transition",
+      type: "video",
+      mode: ["startEndRequired"],
+      audio: false,
+      durationResolutionMap: [
+        { duration: [5, 8, 10, 12], resolution: ["480p", "720p"] },
+      ],
+    },
+    {
+      name: "LTX-2.3 distilled-fast 快速出片 (22B + distilled-384 LoRA, 8 步)",
+      modelName: "ltx2.3-distilled-fast",
+      type: "video",
+      mode: ["text", "singleImage"],
+      audio: false,
+      durationResolutionMap: [
+        { duration: [5, 8, 10, 12, 15, 20], resolution: ["480p", "720p"] },
+      ],
+    },
+    {
+      name: "LTX-2.3 Licon-VBVR 多图参考 (22B + LiconMSR, 1-4 张 ref)",
+      modelName: "ltx2.3-licon-vbvr",
+      type: "video",
+      mode: ["imageReference:4"],
+      audio: false,
+      durationResolutionMap: [
+        { duration: [5, 8, 10, 12, 15], resolution: ["480p", "720p"] },
+      ],
+    },
+    // ---- B 档 (5 个) ----
+    {
+      name: "LTX-2.3 IC-LoRA union-control (22B + union LoRA + depth/pose/canny)",
+      modelName: "ltx2.3-ic-union-control",
+      type: "video",
+      mode: ["imageReference:2"],
+      audio: false,
+      durationResolutionMap: [
+        { duration: [5, 8, 10, 12], resolution: ["480p", "720p"] },
+      ],
+    },
+    {
+      name: "LTX-2.3 IC-LoRA motion-track (22B + motion LoRA + 运动参考)",
+      modelName: "ltx2.3-ic-motion-track",
+      type: "video",
+      mode: ["imageReference:2"],
+      audio: false,
+      durationResolutionMap: [
+        { duration: [5, 8, 10, 12], resolution: ["480p", "720p"] },
+      ],
+    },
+    {
+      name: "SVD 图生视频 (svd.safetensors + Baked VAE + clip_vision_h)",
+      modelName: "svd-i2v",
+      type: "video",
+      mode: ["singleImage"],
+      audio: false,
+      durationResolutionMap: [
+        { duration: [2, 3, 4, 5], resolution: ["480p"] },
+      ],
+    },
+    {
+      name: "z-image + 角色 LoRA (韩立/宋玉/慕沛灵/梅凝/燕如嫣/紫灵 trigger)",
+      modelName: "z-image-character",
+      type: "image",
+      mode: ["text"],
+    },
+    {
+      name: "SDXL + IP-Adapter faceid (plus-face + insightface buffalo_l, 锁人脸)",
+      modelName: "sdxl-portrait-faceid",
+      type: "image",
+      mode: ["singleImage"],
+    },
+    // ---- C 档 (3 个, C-1 合并到 A-1) ----
+    {
+      name: "LTX 4K 上采 (SDXL + RealESRGAN_x4plus, 限定 2K 防 OOM)",
+      modelName: "ltx2.3-4k-upscale",
+      type: "image",
+      mode: ["singleImage"],
+    },
+    {
+      name: "Flux2 + Turbo LoRA (Flux_2-Turbo-LoRA 4 步极速出图)",
+      modelName: "flux2-turbo-lora",
+      type: "image",
+      mode: ["text"],
+    },
+    {
+      name: "LTX-SVD 段间过渡 (SVD + smooth crossfade prompt, 段末 + 段首)",
+      modelName: "ltx2.3-svd-crossfade",
+      type: "video",
+      mode: ["imageReference:2"],
+      audio: false,
+      durationResolutionMap: [
+        { duration: [2, 3, 4, 5], resolution: ["480p"] },
+      ],
+    },
   ],
 };
 
@@ -395,6 +505,22 @@ async function comfyUploadImage(base64: string, filename: string = "ref.png"): P
   const buffer = Buffer.from(b64, "base64");
   const form = new FormData();
   form.append("image", buffer, { filename, contentType: "image/png" });
+  form.append("type", "input");
+  form.append("overwrite", "true");
+  const resp = await axios.post(`${getBaseUrl()}/upload/image`, form, {
+    headers: { ...form.getHeaders?.(), ...(vendor.inputValues.apiKey ? { Authorization: `Bearer ${vendor.inputValues.apiKey}` } : {}) },
+    timeout: 60_000,
+  });
+  return resp.data.name;
+}
+
+async function comfyUploadAudio(base64: string, filename: string = "ref.wav"): Promise<string> {
+  // 复用 ComfyUI /upload/image 端点 (ComfyUI 不区分 mime, 接受任意 binary dump 到 input dir)
+  // 2026-08-15: 给 LTX-2.3 AV-LoRA talking-head + audioReference 模式用
+  const b64 = base64.includes(",") ? base64.split(",")[1] : base64;
+  const buffer = Buffer.from(b64, "base64");
+  const form = new FormData();
+  form.append("image", buffer, { filename, contentType: "audio/wav" });
   form.append("type", "input");
   form.append("overwrite", "true");
   const resp = await axios.post(`${getBaseUrl()}/upload/image`, form, {
@@ -960,6 +1086,368 @@ function buildLtx2_3Repair(prompt: string, width: number, height: number, length
 }
 
 // ============================================================
+// 2026-08-15 新增 12 个工作流 build 函数（mavis phase12）
+// 全部基于本机已装模型，无需新下载
+// ============================================================
+
+// ---- A-1: LTX-2.3 AV-LoRA talking-head (音频驱动说话视频) ----
+function buildLtx2_3AVTalkingHead(prompt: string, width: number, height: number, length: number, seed: number, refImage: string, audioRef: string): any {
+  // 22B-fp8 + AV-LoRA + LTXVImgToVideo 单图 + LTXVReferenceAudio (音频) + LTXVConcatAVLatent 合并音视频
+  // 输入: refImage=单首帧图, audioRef=音频 wav 路径(已上传到 ComfyUI input)
+  // 输出: 带音轨 mp4
+  return {
+    "1": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors" } },
+    "2": { class_type: "LTXAVTextEncoderLoader", inputs: { text_encoder: "gemma_3_12B_it_fpmixed.safetensors", ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors", device: "default" } },
+    "3": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: prompt } },
+    "4": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: NEGATIVE_VIDEO } },
+    "5": { class_type: "LTXICLoRALoaderModelOnly", inputs: { model: ["1", 0], lora_name: "LTX-2.3-22b-AV-LoRA-talking-head-v1.safetensors", strength_model: 1.0 } },
+    "10": { class_type: "LoadImage", inputs: { image: refImage } },
+    "11": { class_type: "ImageScale", inputs: { image: ["10", 0], width, height, upscale_method: "lanczos", crop: "center" } },
+    "20": { class_type: "LTXVImgToVideo", inputs: { positive: ["3", 0], negative: ["4", 0], vae: ["1", 2], image: ["11", 0], width, height, length, batch_size: 1, strength: 0.7 } },
+    "21": { class_type: "LTXVAudioVAELoader", inputs: { ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors" } },
+    "22": { class_type: "LoadAudio", inputs: { audio: audioRef } },
+    "23": { class_type: "LTXVReferenceAudio", inputs: { model: ["5", 0], positive: ["20", 0], negative: ["20", 1], reference_audio: ["22", 0], audio_vae: ["21", 0], identity_guidance_scale: 3.0, start_percent: 0.0, end_percent: 1.0 } },
+    "7": { class_type: "LTXVScheduler", inputs: { steps: 20, max_shift: 2.05, base_shift: 0.95, stretch: true, terminal: 0.1 } },
+    "8": { class_type: "KSamplerSelect", inputs: { sampler_name: "euler" } },
+    "9": {
+      class_type: "SamplerCustom",
+      inputs: {
+        model: ["5", 0], positive: ["23", 0], negative: ["23", 1],
+        sampler: ["8", 0], sigmas: ["7", 0], latent_image: ["20", 2],
+        add_noise: true, noise_seed: seed, cfg: 3.0,
+      },
+    },
+    "30": { class_type: "LTX2AudioLatentNormalizingSampling", inputs: { model: ["5", 0], audio_normalization_factors: "1,1,0.25,1,1,0.25,1,1" } },
+    "31": { class_type: "LTXVSpatioTemporalTiledVAEDecode", inputs: { vae: ["1", 2], latents: ["9", 0], spatial_tiles: 4, spatial_overlap: 1, temporal_tile_length: 16, temporal_overlap: 1, last_frame_fix: false, working_device: "auto", working_dtype: "auto" } },
+    "32": { class_type: "VHS_VideoCombine", inputs: { images: ["31", 0], frame_rate: 24, loop_count: 0, filename_prefix: "toonflow_av_talk", format: "video/h264-mp4", pingpong: false, save_output: true, audio: ["22", 0] } },
+  };
+}
+
+// ---- A-2: LTX-2.3 transition 转场 ----
+function buildLtx2_3Transition(prompt: string, width: number, height: number, length: number, seed: number, startImg: string, endImg: string): any {
+  // 22B + transition LoRA + LTXVFirstLastFrameControl_TTP (真首尾帧) + 触发词 zhuanchang 自动拼到 prompt
+  const fullPrompt = (prompt || "") + " zhuanchang";
+  return {
+    "1": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors" } },
+    "2": { class_type: "LTXAVTextEncoderLoader", inputs: { text_encoder: "gemma_3_12B_it_fpmixed.safetensors", ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors", device: "default" } },
+    "3": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: fullPrompt } },
+    "4": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: NEGATIVE_VIDEO } },
+    "5": { class_type: "LTXICLoRALoaderModelOnly", inputs: { model: ["1", 0], lora_name: "ltx2.3-transition.safetensors", strength_model: 1.0 } },
+    "20": { class_type: "LoadImage", inputs: { image: startImg } },
+    "21": { class_type: "ImageScale", inputs: { image: ["20", 0], width, height, upscale_method: "lanczos", crop: "center" } },
+    "24": { class_type: "LoadImage", inputs: { image: endImg } },
+    "25": { class_type: "ImageScale", inputs: { image: ["24", 0], width, height, upscale_method: "lanczos", crop: "center" } },
+    "30": { class_type: "EmptyLTXVLatentVideo", inputs: { width, height, length, batch_size: 1 } },
+    "31": { class_type: "LTXVFirstLastFrameControl_TTP", inputs: { vae: ["1", 2], latent: ["30", 0], first_strength: 1.0, last_strength: 1.0, first_image: ["21", 0], last_image: ["25", 0] } },
+    "7": { class_type: "LTXVScheduler", inputs: { steps: 20, max_shift: 2.05, base_shift: 0.95, stretch: true, terminal: 0.1 } },
+    "8": { class_type: "KSamplerSelect", inputs: { sampler_name: "euler" } },
+    "9": {
+      class_type: "SamplerCustom",
+      inputs: {
+        model: ["5", 0], positive: ["3", 0], negative: ["4", 0],
+        sampler: ["8", 0], sigmas: ["7", 0], latent_image: ["31", 0],
+        add_noise: true, noise_seed: seed, cfg: 3.0,
+      },
+    },
+    "10": { class_type: "VAEDecode", inputs: { samples: ["9", 0], vae: ["1", 2] } },
+    "11": { class_type: "VHS_VideoCombine", inputs: { images: ["10", 0], frame_rate: 24, loop_count: 0, filename_prefix: "toonflow_transition", format: "video/h264-mp4", pingpong: false, save_output: true } },
+  };
+}
+
+// ---- A-3: LTX-2.3 distilled-fast 快速出片 (8 步 + distilled LoRA) ----
+function buildLtx2_3DistilledFast(prompt: string, width: number, height: number, length: number, seed: number, refImage: string | null): any {
+  // 22B + distilled-384 LoRA + 8 步/简单 scheduler 出片快
+  // 模式: text=refImage=null, singleImage=refImage=<ref>
+  const wf: any = {
+    "1": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors" } },
+    "2": { class_type: "LTXAVTextEncoderLoader", inputs: { text_encoder: "gemma_3_12B_it_fpmixed.safetensors", ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors", device: "default" } },
+    "3": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: prompt } },
+    "4": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: NEGATIVE_VIDEO } },
+    "5": { class_type: "LTXICLoRALoaderModelOnly", inputs: { model: ["1", 0], lora_name: "ltx-2.3-22b-distilled-lora-384.safetensors", strength_model: 0.85 } },
+  };
+  if (refImage) {
+    wf["20"] = { class_type: "LoadImage", inputs: { image: refImage } };
+    wf["21"] = { class_type: "ImageScale", inputs: { image: ["20", 0], width, height, upscale_method: "lanczos", crop: "center" } };
+    wf["22"] = { class_type: "LTXVImgToVideo", inputs: { positive: ["3", 0], negative: ["4", 0], vae: ["1", 2], image: ["21", 0], width, height, length, batch_size: 1, strength: 0.7 } };
+  } else {
+    wf["22"] = { class_type: "EmptyLTXVLatentVideo", inputs: { width, height, length, batch_size: 1 } };
+  }
+  wf["7"] = { class_type: "LTXVScheduler", inputs: { steps: 8, max_shift: 2.05, base_shift: 0.95, stretch: true, terminal: 0.1 } };
+  wf["8"] = { class_type: "KSamplerSelect", inputs: { sampler_name: "euler" } };
+  const condPos = refImage ? ["22", 0] : ["3", 0];
+  const condNeg = refImage ? ["22", 1] : ["4", 0];
+  const latent = refImage ? ["22", 2] : ["22", 0];
+  wf["9"] = {
+    class_type: "SamplerCustom",
+    inputs: {
+      model: ["5", 0], positive: condPos, negative: condNeg,
+      sampler: ["8", 0], sigmas: ["7", 0], latent_image: latent,
+      add_noise: true, noise_seed: seed, cfg: 1.0,
+    },
+  };
+  wf["10"] = { class_type: "VAEDecode", inputs: { samples: ["9", 0], vae: ["1", 2] } };
+  wf["11"] = { class_type: "VHS_VideoCombine", inputs: { images: ["10", 0], frame_rate: 24, loop_count: 0, filename_prefix: "toonflow_distilled", format: "video/h264-mp4", pingpong: false, save_output: true } };
+  return wf;
+}
+
+// ---- A-5: LTX-2.3 Licon-VBVR 多图参考视频 ----
+function buildLtx2_3LiconVBVR(prompt: string, width: number, height: number, length: number, seed: number, refImages: string[]): any {
+  // 22B + Licon-VBVR LoRA + LiconMSR 节点(支持 1-4 张图 + background)
+  // refImages: 1-4 张 ref 图（按顺序填到 1/2/3/4）
+  const wf: any = {
+    "1": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors" } },
+    "2": { class_type: "LTXAVTextEncoderLoader", inputs: { text_encoder: "gemma_3_12B_it_fpmixed.safetensors", ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors", device: "default" } },
+    "3": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: prompt } },
+    "4": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: NEGATIVE_VIDEO } },
+    "5": { class_type: "LTXICLoRALoaderModelOnly", inputs: { model: ["1", 0], lora_name: "Ltx2.3-Licon-VBVR-I2V-240K-R32.safetensors", strength_model: 1.0 } },
+  };
+  // 加载 1-4 张 ref 图（按 LiconMSR 节点 1/2/3/4 接口）
+  for (let i = 0; i < Math.min(4, refImages.length); i++) {
+    const loadId = 10 + i * 2;
+    const scaleId = 11 + i * 2;
+    wf[String(loadId)] = { class_type: "LoadImage", inputs: { image: refImages[i] } };
+    wf[String(scaleId)] = { class_type: "ImageScale", inputs: { image: [String(loadId), 0], width, height, upscale_method: "lanczos", crop: "center" } };
+  }
+  // LiconMSR 节点: width/height/frame_count + 1/2/3/4 (4 张 ref 图) + background
+  const liconInput: any = { width, height, frame_count: "41" };
+  for (let i = 0; i < Math.min(4, refImages.length); i++) {
+    const scaleId = 11 + i * 2;
+    liconInput[String(i + 1)] = [String(scaleId), 0];
+  }
+  wf["30"] = { class_type: "LiconMSR", inputs: liconInput };
+  wf["7"] = { class_type: "LTXVScheduler", inputs: { steps: 20, max_shift: 2.05, base_shift: 0.95, stretch: true, terminal: 0.1 } };
+  wf["8"] = { class_type: "KSamplerSelect", inputs: { sampler_name: "euler" } };
+  // 关键: LiconMSR 输出本身是 [MODEL, POSITIVE, NEGATIVE, LATENT]
+  wf["9"] = {
+    class_type: "SamplerCustom",
+    inputs: {
+      model: ["30", 0], positive: ["30", 1], negative: ["30", 2],
+      sampler: ["8", 0], sigmas: ["7", 0], latent_image: ["30", 3],
+      add_noise: true, noise_seed: seed, cfg: 3.0,
+    },
+  };
+  wf["10"] = { class_type: "VAEDecode", inputs: { samples: ["9", 0], vae: ["1", 2] } };
+  wf["11"] = { class_type: "VHS_VideoCombine", inputs: { images: ["10", 0], frame_rate: 24, loop_count: 0, filename_prefix: "toonflow_vbvr", format: "video/h264-mp4", pingpong: false, save_output: true } };
+  return wf;
+}
+
+// ---- B-1: LTX-2.3 IC-LoRA union-control (深度/姿势/canby 控制) ----
+function buildLtx2_3ICUnionControl(prompt: string, width: number, height: number, length: number, seed: number, refImage: string, controlImage: string): any {
+  // 22B + union-control LoRA + ref 图 + control 图(depth/pose/canny)
+  // 用 DepthAnythingV2Preprocessor 从 refImage 抽 depth, 再用 controlImage 直接喂 union LoRA
+  return {
+    "1": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors" } },
+    "2": { class_type: "LTXAVTextEncoderLoader", inputs: { text_encoder: "gemma_3_12B_it_fpmixed.safetensors", ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors", device: "default" } },
+    "3": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: prompt } },
+    "4": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: NEGATIVE_VIDEO } },
+    "5": { class_type: "LTXICLoRALoaderModelOnly", inputs: { model: ["1", 0], lora_name: "ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors", strength_model: 1.0 } },
+    "10": { class_type: "LoadImage", inputs: { image: refImage } },
+    "11": { class_type: "ImageScale", inputs: { image: ["10", 0], width, height, upscale_method: "lanczos", crop: "center" } },
+    "20": { class_type: "LoadImage", inputs: { image: controlImage } },
+    "21": { class_type: "ImageScale", inputs: { image: ["20", 0], width, height, upscale_method: "lanczos", crop: "center" } },
+    "30": { class_type: "EmptyLTXVLatentVideo", inputs: { width, height, length, batch_size: 1 } },
+    "31": { class_type: "LTXAddVideoICLoRAGuideAdvanced", inputs: { positive: ["3", 0], negative: ["4", 0], vae: ["1", 2], latent: ["30", 0], image: ["21", 0], frame_idx: 0, strength: 1.0, latent_downscale_factor: 1.0, crop: "disabled", use_tiled_encode: false, tile_size: 256, tile_overlap: 64, attention_strength: 1.0 } },
+    "7": { class_type: "LTXVScheduler", inputs: { steps: 20, max_shift: 2.05, base_shift: 0.95, stretch: true, terminal: 0.1 } },
+    "8": { class_type: "KSamplerSelect", inputs: { sampler_name: "euler" } },
+    "9": {
+      class_type: "SamplerCustom",
+      inputs: {
+        model: ["5", 0], positive: ["31", 0], negative: ["31", 1],
+        sampler: ["8", 0], sigmas: ["7", 0], latent_image: ["31", 2],
+        add_noise: true, noise_seed: seed, cfg: 3.0,
+      },
+    },
+    "10": { class_type: "VAEDecode", inputs: { samples: ["9", 0], vae: ["1", 2] } },
+    "11": { class_type: "VHS_VideoCombine", inputs: { images: ["10", 0], frame_rate: 24, loop_count: 0, filename_prefix: "toonflow_ic_union", format: "video/h264-mp4", pingpong: false, save_output: true } },
+  };
+}
+
+// ---- B-2: LTX-2.3 IC-LoRA motion-track 镜头运动控制 ----
+function buildLtx2_3ICMotionTrack(prompt: string, width: number, height: number, length: number, seed: number, refImage: string, motionImage: string): any {
+  // 22B + motion-track-control LoRA + ref 图 + 运动参考图(通常 2-3 帧拼接)
+  return {
+    "1": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors" } },
+    "2": { class_type: "LTXAVTextEncoderLoader", inputs: { text_encoder: "gemma_3_12B_it_fpmixed.safetensors", ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors", device: "default" } },
+    "3": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: prompt } },
+    "4": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: NEGATIVE_VIDEO } },
+    "5": { class_type: "LTXICLoRALoaderModelOnly", inputs: { model: ["1", 0], lora_name: "ltx-2.3-22b-ic-lora-motion-track-control-ref0.5.safetensors", strength_model: 1.0 } },
+    "10": { class_type: "LoadImage", inputs: { image: refImage } },
+    "11": { class_type: "ImageScale", inputs: { image: ["10", 0], width, height, upscale_method: "lanczos", crop: "center" } },
+    "20": { class_type: "LoadImage", inputs: { image: motionImage } },
+    "21": { class_type: "ImageScale", inputs: { image: ["20", 0], width, height, upscale_method: "lanczos", crop: "center" } },
+    "30": { class_type: "EmptyLTXVLatentVideo", inputs: { width, height, length, batch_size: 1 } },
+    "31": { class_type: "LTXAddVideoICLoRAGuideAdvanced", inputs: { positive: ["3", 0], negative: ["4", 0], vae: ["1", 2], latent: ["30", 0], image: ["21", 0], frame_idx: 0, strength: 1.0, latent_downscale_factor: 1.0, crop: "disabled", use_tiled_encode: false, tile_size: 256, tile_overlap: 64, attention_strength: 1.0 } },
+    "7": { class_type: "LTXVScheduler", inputs: { steps: 20, max_shift: 2.05, base_shift: 0.95, stretch: true, terminal: 0.1 } },
+    "8": { class_type: "KSamplerSelect", inputs: { sampler_name: "euler" } },
+    "9": {
+      class_type: "SamplerCustom",
+      inputs: {
+        model: ["5", 0], positive: ["31", 0], negative: ["31", 1],
+        sampler: ["8", 0], sigmas: ["7", 0], latent_image: ["31", 2],
+        add_noise: true, noise_seed: seed, cfg: 3.0,
+      },
+    },
+    "10": { class_type: "VAEDecode", inputs: { samples: ["9", 0], vae: ["1", 2] } },
+    "11": { class_type: "VHS_VideoCombine", inputs: { images: ["10", 0], frame_rate: 24, loop_count: 0, filename_prefix: "toonflow_ic_motion", format: "video/h264-mp4", pingpong: false, save_output: true } },
+  };
+}
+
+// ---- B-3: SVD 图生视频 (经典 stable video diffusion) ----
+function buildSvdI2v(prompt: string, width: number, height: number, length: number, seed: number, refImage: string): any {
+  // svd.safetensors + init_image + SVD_img2vid_Conditioning + KSampler
+  // SVD 走标准 KSampler (不是 LTXV 链)
+  // 注意 SVD 不需要 text encoder, 走 CONDITIONING 0 节点
+  return {
+    "1": { class_type: "ImageOnlyCheckpointLoader", inputs: { ckpt_name: "svd.safetensors" } },
+    "2": { class_type: "CLIPVisionLoader", inputs: { clip_name: "clip_vision_h.safetensors" } },
+    "3": { class_type: "VAELoader", inputs: { vae_name: "kl-f8-anime2.ckpt" } },
+    "10": { class_type: "LoadImage", inputs: { image: refImage } },
+    "11": { class_type: "ImageScale", inputs: { image: ["10", 0], width, height, upscale_method: "lanczos", crop: "center" } },
+    "20": { class_type: "SVD_img2vid_Conditioning", inputs: { clip_vision: ["2", 0], init_image: ["11", 0], vae: ["3", 0], width, height, video_frames: Math.min(14, length), motion_bucket_id: 127, fps: 6, augmentation_level: 0.0 } },
+    "4": { class_type: "CLIPTextEncode", inputs: { clip: ["1", 1], text: prompt || "smooth motion" } },
+    "5": { class_type: "CLIPTextEncode", inputs: { clip: ["1", 1], text: NEGATIVE_VIDEO } },
+    "6": { class_type: "EmptyLatentImage", inputs: { width, height, batch_size: 1 } },
+    "7": {
+      class_type: "KSampler",
+      inputs: {
+        model: ["1", 0], positive: ["20", 0], negative: ["20", 1], latent_image: ["20", 2],
+        seed, steps: 25, cfg: 2.5, sampler_name: "euler", scheduler: "normal", denoise: 1.0,
+      },
+    },
+    "8": { class_type: "VAEDecode", inputs: { samples: ["7", 0], vae: ["3", 0] } },
+    "9": { class_type: "VHS_VideoCombine", inputs: { images: ["8", 0], frame_rate: 6, loop_count: 0, filename_prefix: "toonflow_svd", format: "video/h264-mp4", pingpong: false, save_output: true } },
+  };
+}
+
+// ---- B-4: z-image + 角色 LoRA 出角色一致性图 ----
+function buildZImageCharacter(prompt: string, width: number, height: number, seed: number, loraName: string, triggerWord: string): any {
+  // z_image_turbo + 通用 LoraLoaderModelOnly (z-image 不是 LTX 链, 用通用 LoRA loader)
+  // loraName: ltx2.3韩立触发词hanli.safetensors / ltx2.3宋玉-songyu.safetensors 等
+  // triggerWord: hanli / songyu / peiling / meining / ruyan / ziling
+  const fullPrompt = triggerWord ? `${triggerWord}, ${prompt}` : prompt;
+  return {
+    "1": { class_type: "UNETLoader", inputs: { unet_name: "z_image_turbo_bf16.safetensors", weight_dtype: "default" } },
+    "2": { class_type: "CLIPLoader", inputs: { clip_name: "qwen_3_4b.safetensors", type: "qwen_image", device: "default" } },
+    "3": { class_type: "VAELoader", inputs: { vae_name: "ae.safetensors" } },
+    "4": { class_type: "LoraLoaderModelOnly", inputs: { model: ["1", 0], lora_name: loraName, strength_model: 0.85 } },
+    "5": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: fullPrompt } },
+    "6": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: NEGATIVE_DEFAULT + ", " + "STRICTLY NO TEXT, NO CHINESE CHARACTERS, NO WATERMARKS" } },
+    "7": { class_type: "EmptyLatentImage", inputs: { width, height, batch_size: 1 } },
+    "8": {
+      class_type: "KSampler",
+      inputs: {
+        model: ["4", 0], positive: ["5", 0], negative: ["6", 0], latent_image: ["7", 0],
+        seed, steps: 9, cfg: 1, sampler_name: "euler", scheduler: "simple", denoise: 1.0,
+      },
+    },
+    "9": { class_type: "VAEDecode", inputs: { samples: ["8", 0], vae: ["3", 0] } },
+    "10": { class_type: "SaveImage", inputs: { images: ["9", 0], filename_prefix: "toonflow_zchar" } },
+  };
+}
+
+// ---- B-5: SDXL + IP-Adapter faceid 锁人脸 ----
+function buildSdxlPortraitFaceid(prompt: string, width: number, height: number, seed: number, refImage: string): any {
+  // SDXL base + IP-Adapter (plus-face) + InsightFace (buffalo_l) + 人脸参考图
+  return {
+    "1": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "sd_xl_base_1.0.safetensors" } },
+    "2": { class_type: "CLIPTextEncode", inputs: { clip: ["1", 1], text: prompt } },
+    "3": { class_type: "CLIPTextEncode", inputs: { clip: ["1", 1], text: NEGATIVE_DEFAULT } },
+    "4": { class_type: "EmptyLatentImage", inputs: { width, height, batch_size: 1 } },
+    "5": { class_type: "IPAdapterModelLoader", inputs: { ipadapter_file: "ip-adapter-plus-face_sdxl_vit-h.safetensors" } },
+    "6": { class_type: "IPAdapterInsightFaceLoader", inputs: { provider: "CPU", model_name: "buffalo_l" } },
+    "7": { class_type: "LoadImage", inputs: { image: refImage } },
+    "8": { class_type: "ImageScale", inputs: { image: ["7", 0], width, height, upscale_method: "lanczos", crop: "center" } },
+    "9": { class_type: "IPAdapterFaceID", inputs: { model: ["1", 0], ipadapter: ["5", 0], image: ["8", 0], weight: 0.85, weight_faceidv2: 0.85, weight_type: "linear", combine_embeds: "average", start_at: 0.0, end_at: 1.0, embeds_scaling: "K+V", insightface: ["6", 0] } },
+    "10": {
+      class_type: "KSampler",
+      inputs: {
+        model: ["9", 0], positive: ["2", 0], negative: ["3", 0], latent_image: ["4", 0],
+        seed, steps: 30, cfg: 7, sampler_name: "euler", scheduler: "normal", denoise: 1.0,
+      },
+    },
+    "11": { class_type: "VAEDecode", inputs: { samples: ["10", 0], vae: ["1", 2] } },
+    "12": { class_type: "SaveImage", inputs: { images: ["11", 0], filename_prefix: "toonflow_faceid" } },
+  };
+}
+
+// ---- C-2: LTX 视频/图像 4K 上采 (限定 2K 防 OOM) ----
+function buildLtx4kUpscale(prompt: string, width: number, height: number, seed: number, refImage: string): any {
+  // SDXL + RealESRGAN_x4plus 上采 + KSampler 二次细化, 输出 max 2K (防 16GB 显存爆)
+  // 16GB 卡不跑 4K 真, 改成 2K 上采 (从 1024 上到 1536)
+  const scaleW = Math.min(width * 1.5, 1536);
+  const scaleH = Math.min(height * 1.5, 1536);
+  return {
+    "1": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "sd_xl_base_1.0.safetensors" } },
+    "2": { class_type: "CLIPTextEncode", inputs: { clip: ["1", 1], text: prompt } },
+    "3": { class_type: "CLIPTextEncode", inputs: { clip: ["1", 1], text: NEGATIVE_DEFAULT } },
+    "10": { class_type: "LoadImage", inputs: { image: refImage } },
+    "11": { class_type: "UpscaleModelLoader", inputs: { model_name: "RealESRGAN_x4plus.safetensors" } },
+    "12": { class_type: "ImageUpscaleWithModel", inputs: { upscale_model: ["11", 0], image: ["10", 0] } },
+    "13": { class_type: "ImageScale", inputs: { image: ["12", 0], width: scaleW, height: scaleH, upscale_method: "lanczos", crop: "center" } },
+    "14": { class_type: "VAEEncode", inputs: { pixels: ["13", 0], vae: ["1", 2] } },
+    "15": {
+      class_type: "KSampler",
+      inputs: {
+        model: ["1", 0], positive: ["2", 0], negative: ["3", 0], latent_image: ["14", 0],
+        seed, steps: 25, cfg: 7, sampler_name: "euler", scheduler: "normal", denoise: 0.35,
+      },
+    },
+    "16": { class_type: "VAEDecode", inputs: { samples: ["15", 0], vae: ["1", 2] } },
+    "17": { class_type: "SaveImage", inputs: { images: ["16", 0], filename_prefix: "toonflow_4kup" } },
+  };
+}
+
+// ---- C-3: Flux2 + Turbo LoRA 极速出图 (4 步) ----
+function buildFlux2TurboLora(prompt: string, width: number, height: number, seed: number): any {
+  // Flux2 fp8mixed + Flux_2-Turbo-LoRA (4 步快速)
+  return {
+    "1": { class_type: "UNETLoader", inputs: { unet_name: "flux2_dev_fp8mixed.safetensors", weight_dtype: "default" } },
+    "2": { class_type: "CLIPLoader", inputs: { clip_name: "mistral_3_small_flux2_bf16.safetensors", type: "flux2", device: "default" } },
+    "3": { class_type: "VAELoader", inputs: { vae_name: "full_encoder_small_decoder.safetensors" } },
+    "4": { class_type: "LoraLoaderModelOnly", inputs: { model: ["1", 0], lora_name: "Flux_2-Turbo-LoRA_comfyui.safetensors", strength_model: 0.8 } },
+    "5": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: prompt } },
+    "6": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: NEGATIVE_DEFAULT } },
+    "7": { class_type: "EmptyLatentImage", inputs: { width, height, batch_size: 1 } },
+    "8": {
+      class_type: "KSampler",
+      inputs: {
+        model: ["4", 0], positive: ["5", 0], negative: ["6", 0], latent_image: ["7", 0],
+        seed, steps: 4, cfg: 1.0, sampler_name: "euler", scheduler: "simple", denoise: 1.0,
+      },
+    },
+    "9": { class_type: "VAEDecode", inputs: { samples: ["8", 0], vae: ["3", 0] } },
+    "10": { class_type: "SaveImage", inputs: { images: ["9", 0], filename_prefix: "toonflow_flux2t" } },
+  };
+}
+
+// ---- C-4: SVD 段间过渡 (crossfade) ----
+function buildLtxSvdCrossfade(prompt: string, width: number, height: number, length: number, seed: number, startImg: string, endImg: string): any {
+  // 用 SVD 在段末+段首之间生成短过渡, prompt 强调 "smooth crossfade"
+  // 把首图当 init_image, 末图当目标参考 (用 IPAdapter 控制)
+  // 简化: SVD 只取首图, prompt 引导生成末图模糊效果
+  const fullPrompt = (prompt || "") + ", smooth crossfade transition, gradual blend, no jump cut";
+  return {
+    "1": { class_type: "ImageOnlyCheckpointLoader", inputs: { ckpt_name: "svd.safetensors" } },
+    "2": { class_type: "CLIPVisionLoader", inputs: { clip_name: "clip_vision_h.safetensors" } },
+    "3": { class_type: "VAELoader", inputs: { vae_name: "kl-f8-anime2.ckpt" } },
+    "10": { class_type: "LoadImage", inputs: { image: startImg } },
+    "11": { class_type: "ImageScale", inputs: { image: ["10", 0], width, height, upscale_method: "lanczos", crop: "center" } },
+    "20": { class_type: "SVD_img2vid_Conditioning", inputs: { clip_vision: ["2", 0], init_image: ["11", 0], vae: ["3", 0], width, height, video_frames: Math.min(14, length), motion_bucket_id: 60, fps: 6, augmentation_level: 0.0 } },
+    "21": { class_type: "CLIPTextEncode", inputs: { clip: ["1", 1], text: fullPrompt } },
+    "22": { class_type: "CLIPTextEncode", inputs: { clip: ["1", 1], text: NEGATIVE_VIDEO } },
+    "7": {
+      class_type: "KSampler",
+      inputs: {
+        model: ["1", 0], positive: ["20", 0], negative: ["20", 1], latent_image: ["20", 2],
+        seed, steps: 20, cfg: 2.0, sampler_name: "euler", scheduler: "normal", denoise: 1.0,
+      },
+    },
+    "8": { class_type: "VAEDecode", inputs: { samples: ["7", 0], vae: ["3", 0] } },
+    "9": { class_type: "VHS_VideoCombine", inputs: { images: ["8", 0], frame_rate: 6, loop_count: 0, filename_prefix: "toonflow_crossfade", format: "video/h264-mp4", pingpong: false, save_output: true } },
+  };
+}
+
+// ============================================================
 // 适配器函数
 // ============================================================
 
@@ -973,7 +1461,7 @@ const imageRequest = async (config: ImageConfig, model: ImageModel): Promise<str
 
   // ---- reference 图片上传（一次性，重试复用同一张 ref）----
   let refName: string | null = null;
-  if (["sd-upscale-img", "face-detailer", "portrait-enhance", "upscale-usdu", "qwen-image-edit"].includes(model.modelName)) {
+  if (["sd-upscale-img", "face-detailer", "portrait-enhance", "upscale-usdu", "qwen-image-edit", "sdxl-portrait-faceid", "ltx2.3-4k-upscale"].includes(model.modelName)) {
     const refs = config.referenceList || [];
     if (refs.length === 0) throw new Error(`${model.modelName} 需要 reference 图片，但 Toonflow 未提供`);
     refName = await comfyUploadImage(refs[0].base64, `ref_${Date.now()}.png`);
@@ -1036,6 +1524,23 @@ const imageRequest = async (config: ImageConfig, model: ImageModel): Promise<str
         if (!refName) throw new Error("upscale-usdu 需要 reference 图片");
         wf = buildUpscaleUsdu(config.prompt, w, h, seed, refName);
         break;
+      case "z-image-character":
+        // 2026-08-15: z-image + 角色 LoRA (默认韩立, 触发词 hanli)
+        // mode 字段存 lora+trigger 组合: "ltx2.3韩立触发词hanli.safetensors:hanli" 或 "ltx2.3宋玉-songyu.safetensors:songyu"
+        // 简化: 走默认 lora + trigger (后续可扩展 UI 选角色)
+        wf = buildZImageCharacter(config.prompt, w, h, seed, "ltx2.3韩立触发词hanli.safetensors", "hanli");
+        break;
+      case "sdxl-portrait-faceid":
+        if (!refName) throw new Error("sdxl-portrait-faceid 需要 reference 人脸图");
+        wf = buildSdxlPortraitFaceid(config.prompt, w, h, seed, refName);
+        break;
+      case "ltx2.3-4k-upscale":
+        if (!refName) throw new Error("ltx2.3-4k-upscale 需要 reference 图片");
+        wf = buildLtx4kUpscale(config.prompt, w, h, seed, refName);
+        break;
+      case "flux2-turbo-lora":
+        wf = buildFlux2TurboLora(config.prompt, w, h, seed);
+        break;
       default:
         throw new Error(`未知 image model: ${model.modelName}`);
     }
@@ -1066,16 +1571,24 @@ const videoRequest = async (config: VideoConfig, model: VideoModel): Promise<str
   const seed = newSeed();
   let wf: any;
 
-  // 处理 reference images
+  // 处理 reference images / audio (2026-08-15 扩展支持 audioReference + imageReference:N 多图)
   let startImg: string | null = null;
   let endImg: string | null = null;
-  const imageRefs = (config.referenceList || []).filter((r) => r.type === "image");
-  if (imageRefs.length >= 2) {
-    startImg = await comfyUploadImage(imageRefs[0].base64, `start_${Date.now()}.png`);
-    endImg = await comfyUploadImage(imageRefs[1].base64, `end_${Date.now()}.png`);
-  } else if (imageRefs.length === 1) {
-    startImg = await comfyUploadImage(imageRefs[0].base64, `start_${Date.now()}.png`);
+  const imageRefs: string[] = []; // 1-4 张 ref image (按用户传入顺序)
+  const audioRefs: string[] = []; // 1+ 个 ref audio
+  const allRefs = config.referenceList || [];
+  for (let i = 0; i < allRefs.length; i++) {
+    const r = allRefs[i];
+    if (r.type === "image" && imageRefs.length < 5) {
+      const upName = await comfyUploadImage(r.base64, `ref_${Date.now()}_${imageRefs.length}.png`);
+      imageRefs.push(upName);
+    } else if (r.type === "audio" && audioRefs.length < 2) {
+      const upName = await comfyUploadAudio(r.base64, `audio_${Date.now()}_${audioRefs.length}.wav`);
+      audioRefs.push(upName);
+    }
   }
+  if (imageRefs.length >= 1) startImg = imageRefs[0];
+  if (imageRefs.length >= 2) endImg = imageRefs[1];
 
   switch (model.modelName) {
     case "ltx-2b-t2v":
@@ -1103,6 +1616,46 @@ const videoRequest = async (config: VideoConfig, model: VideoModel): Promise<str
     case "ltx2.3-repair":
       if (!startImg) throw new Error("ltx2.3-repair 需要单图参考");
       wf = buildLtx2_3Repair(config.prompt, w, h, length, seed, startImg);
+      break;
+    case "ltx2.3-av-talking-head":
+      // 2026-08-15: AV-LoRA + 音频驱动 (需要 singleImage + audioReference)
+      if (!startImg) throw new Error("ltx2.3-av-talking-head 需要首图 (singleImage)");
+      if (audioRefs.length < 1) throw new Error("ltx2.3-av-talking-head 需要 audioReference (1 个音频 wav)");
+      wf = buildLtx2_3AVTalkingHead(config.prompt, w, h, length, seed, startImg, audioRefs[0]);
+      break;
+    case "ltx2.3-transition":
+      // 2026-08-15: transition LoRA 转场 (需要 startEndRequired)
+      if (!startImg || !endImg) throw new Error("ltx2.3-transition 需要 startEndRequired (首图 + 尾图)");
+      wf = buildLtx2_3Transition(config.prompt, w, h, length, seed, startImg, endImg);
+      break;
+    case "ltx2.3-distilled-fast":
+      // 2026-08-15: 22B + distilled-384 LoRA, 8 步快速出片 (text 或 singleImage)
+      wf = buildLtx2_3DistilledFast(config.prompt, w, h, length, seed, startImg);
+      break;
+    case "ltx2.3-licon-vbvr":
+      // 2026-08-15: LiconMSR 多图参考 (需要 1-4 张 imageReference)
+      if (imageRefs.length < 1) throw new Error("ltx2.3-licon-vbvr 至少需要 1 张 ref 图 (imageReference:1-4)");
+      wf = buildLtx2_3LiconVBVR(config.prompt, w, h, length, seed, imageRefs);
+      break;
+    case "ltx2.3-ic-union-control":
+      // 2026-08-15: IC-LoRA union control (ref 图 + control 图, imageReference:2)
+      if (imageRefs.length < 2) throw new Error("ltx2.3-ic-union-control 需要 imageReference:2 (ref 图 + control 图)");
+      wf = buildLtx2_3ICUnionControl(config.prompt, w, h, length, seed, imageRefs[0], imageRefs[1]);
+      break;
+    case "ltx2.3-ic-motion-track":
+      // 2026-08-15: IC-LoRA motion track (ref 图 + 运动参考图, imageReference:2)
+      if (imageRefs.length < 2) throw new Error("ltx2.3-ic-motion-track 需要 imageReference:2 (ref 图 + 运动参考图)");
+      wf = buildLtx2_3ICMotionTrack(config.prompt, w, h, length, seed, imageRefs[0], imageRefs[1]);
+      break;
+    case "svd-i2v":
+      // 2026-08-15: SVD 图生视频 (singleImage)
+      if (!startImg) throw new Error("svd-i2v 需要首图 (singleImage)");
+      wf = buildSvdI2v(config.prompt, w, h, length, seed, startImg);
+      break;
+    case "ltx2.3-svd-crossfade":
+      // 2026-08-15: SVD 段间过渡 (imageReference:2 = 段末 + 段首)
+      if (imageRefs.length < 2) throw new Error("ltx2.3-svd-crossfade 需要 imageReference:2 (段末 + 段首)");
+      wf = buildLtxSvdCrossfade(config.prompt, w, h, length, seed, imageRefs[0], imageRefs[1]);
       break;
     case "hunyuan-t2v":
       // 2026-08-13: Hunyuan Video kijai 节点需要 llava-llama-3-8b-text-encoder (未下), 暂时未实现
