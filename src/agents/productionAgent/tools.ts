@@ -45,7 +45,7 @@ const posterItemSchema = z.object({
 export const flowDataSchema = z.object({
   script: z.string().describe("剧本内容"),
   scriptPlan: z.string().describe("拍摄计划"),
-  assets: z.array(assetItemSchema).describe("衍生资产"),
+  assets: z.array(assetItemSchema).describe("全部资产（基础+衍生；基础资产的 derive 为空数组，衍生资产的 assetsId 字段指向父资产 ID）"),
   storyboardTable: z.string().describe("分镜表"),
   storyboard: z.array(storyboardSchema).describe("分镜面板"),
 });
@@ -78,6 +78,74 @@ function createSocketQueue(delayMs = 800) {
     );
     return lastPromise;
   };
+}
+
+/**
+ * 从 o_assets 实时加载当前 script 关联的全部资产（基础 + 衍生），并按 assetsId 关系拼装成
+ * `{ baseAsset, derive[] }` 嵌套结构。schema 里 assetItemSchema.derive 是衍生资产数组。
+ *
+ * 修复 (8-14 主人反馈): 之前 get_flowData 的 assets 字段永远是空数组 — 读 o_agentWorkData 时缓存
+ * 里就没这字段（autoPersistSubAgentOutput 只写 scriptPlan/storyboardTable/storyboard 三个 key），
+ * 现算 fallback 又硬编码 `assets: []`，导致决策层 LLM 误判"基础资产也没有"而错误 block。
+ *
+ * 现在 assets 永远从 o_assets 现算，不走 o_agentWorkData 缓存。其它 key 保持原逻辑。
+ */
+async function loadAssetsFromDb(scriptId: number): Promise<any[]> {
+  if (!scriptId) return [];
+  // 取该 script 关联的全部 o_assets 行（基础 + 衍生），join o_image 拿 filePath
+  const rows: any[] = await u
+    .db("o_assets")
+    .leftJoin("o_scriptAssets", "o_assets.id", "o_scriptAssets.assetId")
+    .leftJoin("o_image", "o_assets.imageId", "o_image.id")
+    .where("o_scriptAssets.scriptId", scriptId)
+    .select(
+      "o_assets.id",
+      "o_assets.name",
+      "o_assets.type",
+      "o_assets.prompt",
+      "o_assets.describe as desc",
+      "o_assets.assetsId as parentAssetId",
+      "o_assets.remark",
+      "o_image.filePath as src",
+    )
+    .orderBy("o_assets.id", "asc");
+
+  if (!rows.length) return [];
+
+  // 拆基础资产 (parentAssetId 为 null) 和衍生资产 (parentAssetId 不为 null)
+  const baseById: Record<number, any> = {};
+  const childrenByParent: Record<number, any[]> = {};
+  for (const r of rows) {
+    const item = {
+      id: r.id,
+      name: r.name,
+      type: r.type,
+      prompt: r.prompt ?? "",
+      desc: r.desc ?? "",
+      src: r.src ?? null,
+    };
+    if (r.parentAssetId == null) {
+      baseById[r.id] = { ...item, derive: [] };
+    } else {
+      if (!childrenByParent[r.parentAssetId]) childrenByParent[r.parentAssetId] = [];
+      childrenByParent[r.parentAssetId].push(item);
+    }
+  }
+  // 把衍生资产挂到父资产的 derive 上
+  for (const parentId of Object.keys(childrenByParent)) {
+    const parent = baseById[Number(parentId)];
+    if (parent) {
+      parent.derive = childrenByParent[Number(parentId)];
+    } else {
+      // 衍生资产的父资产不在该 script 关联里 — 仍以"孤儿顶层"形式返回，避免数据丢失
+      // （前端/审核会看到这条孤儿，不影响主流程）
+      for (const child of childrenByParent[Number(parentId)]) {
+        child.derive = [];
+        baseById[`orphan_${child.id}`] = child;
+      }
+    }
+  }
+  return Object.values(baseById);
 }
 
 export default (toolCpnfig: ToolConfig) => {
@@ -146,6 +214,15 @@ export default (toolCpnfig: ToolConfig) => {
             })),
             workbench: { videoList: [] },
           };
+        }
+
+        // ★ 关键修复 (8-14 主人反馈): assets 字段必须从 o_assets 表实时查, 不走 o_agentWorkData 缓存.
+        // 原因: autoPersistSubAgentOutput 只写 scriptPlan / storyboardTable / storyboard 三个 key,
+        //       缓存里要么没 assets 字段, 要么是 []; 之前的现算 fallback 又硬编码 `assets: []`.
+        //       决策层 LLM 看到 [] 就误判"基础资产也没有"而错误 block 流水线.
+        // 现在: 无论走缓存还是现算, 都用 loadAssetsFromDb 实时覆盖 assets 字段.
+        if (key === "assets") {
+          flowData.assets = await loadAssetsFromDb(scriptId);
         }
 
         thinking.appendText(`获取到${flowDataKeyLabels[key]}(len=${JSON.stringify(flowData[key]).length}):\n` + JSON.stringify(flowData[key], null, 2).slice(0, 800));
