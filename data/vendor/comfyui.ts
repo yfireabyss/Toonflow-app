@@ -252,6 +252,19 @@ const vendor: VendorConfig = {
       ],
     },
     {
+      // 2026-08-14 末段新增: 真首尾帧工作流, 接 LTXVFirstLastFrameControl_TTP 节点
+      // 替代 startend-full 假首尾帧(只接单图 LTXVImgToVideo, 末图参数被忽略)
+      // 场景: 跨段衔接 (section_X 末 = section_X+1 首), 锁死首末姿势
+      name: "LTX-2.3 真首尾帧 (22B fp8 + LTXVFirstLastFrameControl_TTP)",
+      modelName: "ltx2.3-truly-startend",
+      type: "video",
+      mode: ["startEndRequired"],
+      audio: false,
+      durationResolutionMap: [
+        { duration: [5, 8, 10, 12, 15, 20, 25], resolution: ["480p", "720p"] },
+      ],
+    },
+    {
       name: "LTX-2.3 视频修复 (22B fp8 + SeedVR2)",
       modelName: "ltx2.3-repair",
       type: "video",
@@ -888,6 +901,38 @@ function buildLtx2_3StartEndFull(prompt: string, width: number, height: number, 
   };
 }
 
+function buildLtx2_3TrulyStartEnd(prompt: string, width: number, height: number, length: number, seed: number, startImg: string, endImg: string): any {
+  // 2026-08-14 末段新增: 真首尾帧工作流, 替代 startend-full 假首尾帧
+  // 用 LTXVFirstLastFrameControl_TTP 节点真接首末图, 锁死首末姿势
+  // 场景: 跨段衔接, 强制 section_X 末 = section_X+1 首
+  // 节点链: 22B fp8 + gemma + distilled lora + LTXVFirstLastFrameControl_TTP (首末强度 1.0) + 20 步
+  return {
+    "1": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors" } },
+    "2": { class_type: "LTXAVTextEncoderLoader", inputs: { text_encoder: "gemma_3_12B_it_fpmixed.safetensors", ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors", device: "default" } },
+    "3": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: prompt } },
+    "4": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: NEGATIVE_VIDEO } },
+    "30": { class_type: "LoraLoaderModelOnly", inputs: { model: ["1", 0], lora_name: "ltx-2.3-22b-distilled-lora-384.safetensors", strength_model: 0.5 } },
+    "20": { class_type: "LoadImage", inputs: { image: startImg } },
+    "21": { class_type: "ImageScale", inputs: { image: ["20", 0], width, height, upscale_method: "lanczos", crop: "center" } },
+    "24": { class_type: "LoadImage", inputs: { image: endImg } },
+    "25": { class_type: "ImageScale", inputs: { image: ["24", 0], width, height, upscale_method: "lanczos", crop: "center" } },
+    "5": { class_type: "EmptyLTXVLatentVideo", inputs: { width, height, length, batch_size: 1 } },
+    "23": { class_type: "LTXVFirstLastFrameControl_TTP", inputs: { vae: ["1", 2], latent: ["5", 0], first_strength: 1.0, last_strength: 1.0, first_image: ["21", 0], last_image: ["25", 0] } },
+    "7": { class_type: "LTXVScheduler", inputs: { steps: 20, max_shift: 2.05, base_shift: 0.95, stretch: true, terminal: 0.1 } },
+    "8": { class_type: "KSamplerSelect", inputs: { sampler_name: "euler" } },
+    "9": {
+      class_type: "SamplerCustom",
+      inputs: {
+        model: ["30", 0], positive: ["3", 0], negative: ["4", 0],
+        sampler: ["8", 0], sigmas: ["7", 0], latent_image: ["23", 0],
+        add_noise: true, noise_seed: seed, cfg: 3.0,
+      },
+    },
+    "10": { class_type: "VAEDecode", inputs: { samples: ["9", 0], vae: ["1", 2] } },
+    "11": { class_type: "VHS_VideoCombine", inputs: { images: ["10", 0], frame_rate: 24, loop_count: 0, filename_prefix: "toonflow_truly_startend", format: "video/h264-mp4", pingpong: false, save_output: true } },
+  };
+}
+
 function buildLtx2_3Repair(prompt: string, width: number, height: number, length: number, seed: number, refImage: string): any {
   // LTX 22B fp8 图生视频(修复/重生片段)
   // 2026-08-14 修复: 原实现首帧图从未进入 latent(假 i2v), 改为 LTXVImgToVideo 真 i2v
@@ -1050,6 +1095,10 @@ const videoRequest = async (config: VideoConfig, model: VideoModel): Promise<str
     case "ltx2.3-startend-full":
       if (!startImg) throw new Error("ltx2.3-startend-full 需要首帧图");
       wf = buildLtx2_3StartEndFull(config.prompt, w, h, length, seed, startImg, endImg);
+      break;
+    case "ltx2.3-truly-startend":
+      if (!startImg || !endImg) throw new Error("ltx2.3-truly-startend 需要首尾图 (startImg + endImg)");
+      wf = buildLtx2_3TrulyStartEnd(config.prompt, w, h, length, seed, startImg, endImg);
       break;
     case "ltx2.3-repair":
       if (!startImg) throw new Error("ltx2.3-repair 需要单图参考");
