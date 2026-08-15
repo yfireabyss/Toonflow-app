@@ -580,7 +580,16 @@ function lengthFromDuration(durationSec: number, fps: number = 24): number {
   const raw = Math.round(durationSec * fps);
   const clamped = Math.max(9, Math.min(257, raw));
   const k = Math.floor((clamped - 1) / 8);
-  return Math.max(9, Math.min(257, k * 8 + 1));
+  const result = Math.max(9, Math.min(257, k * 8 + 1));
+  // 2026-08-15 v9 经验 23 bug fix: LTX-2.3 22B startend 节点对 9s+ 段有内部 frame 截断
+  // 9s 段公式算 209 帧, 但 LTX 节点实际只输出 121 帧 (≈5s) — 静默错位
+  // workaround: 9s+ 段强制限制到 121 帧, 防止上层 agent 误判"设计 9s = 实际 9s"
+  // 副作用: agent 想跑 9s 段会被强制跑 5s, 必须拆段 (4.5+4.5 / 5+5 / 7+7)
+  if (result > 161) {
+    console.warn(`[lengthFromDuration] ${durationSec}s 设计被强制限制到 121 帧 (≈5s) — LTX-2.3 22B startend 节点对 9s+ 段有内部 frame 截断 (v9 经验 23), 请拆段或缩短设计`);
+    return 121;
+  }
+  return result;
 }
 
 async function comfyPost(path: string, body: any, timeoutMs = 30_000): Promise<any> {
