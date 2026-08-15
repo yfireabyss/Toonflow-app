@@ -309,6 +309,20 @@ const vendor: VendorConfig = {
       ],
     },
     {
+      // 2026-08-15 v9: 22B nvfp4 (4-bit 量化, 无 distilled lora) + 真首尾帧 (强度 1.0) + 8 步快速 + 可选 audio
+      // 主人新规: 禁用 ltx 2.3 distilled lora 加载工作流, 用此 vendor 替代 ltx2.3-truly-startend
+      // 适用: 跨段衔接 (startEndRequired) + 低显存快速出片 (nvfp4 4-bit 比 fp8 显存省 50%)
+      // audio: 传 audioRef 路径则加 LTXVReferenceAudio 节点 (跟 ltx2.3-av-talking-head 同样 audio 流程)
+      name: "LTX-2.3 nvfp4 真首尾帧 (22B 量化, 8 步, 禁 distilled lora, 可选 audio)",
+      modelName: "ltx2.3-nvfp4-startend",
+      type: "video",
+      mode: ["startEndRequired", "audioOptional"],
+      audio: true,
+      durationResolutionMap: [
+        { duration: [5, 8, 10, 12, 15, 20, 25], resolution: ["480p", "720p"] },
+      ],
+    },
+    {
       name: "LTX-2.3 视频修复 (22B fp8 + SeedVR2)",
       modelName: "ltx2.3-repair",
       type: "video",
@@ -1378,6 +1392,53 @@ function buildLtx2_3DistilledFast(prompt: string, width: number, height: number,
   return wf;
 }
 
+// ---- A-4b: LTX-2.3 nvfp4 真首尾帧 (无 distilled lora) + 可选音频 ----
+function buildLtx2_3Nvfp4StartEnd(prompt: string, width: number, height: number, length: number, seed: number, startImg: string, endImg: string, audioRef: string | null): any {
+  // 2026-08-15 主人新规: 禁用 ltx 2.3 distilled lora 加载的工作流
+  // 本函数 = 22B nvfp4 (4-bit 量化) + gemma + LTXVFirstLastFrameControl_TTP 真首尾帧 + 12 步
+  // 2026-08-15 v9 P1 验证: 8 步 + 1.0 锁死 = 中段崩 (模型放弃中段, 走暗化过渡)
+  // 调参: steps 8→12 给中段生成时间 + first/last_strength 1.0→0.7 释放中段空间 (类似 truly-startend-soft)
+  // 不加载 distilled lora (ltx-2.3-22b-distilled-lora-384), 直接用 nvfp4 量化
+  // audioRef 传非空路径则加 LTXVReferenceAudio + VHS_VideoCombine audio 通道; 传 null/空则无声
+  // 节点链: 22B nvfp4 + gemma + EmptyLTXVLatentVideo + 首末帧 (强度 0.7 软锚) + LTXVScheduler 12 步 + KSampler + VAEDecode + (可选)audio
+  const wf: any = {
+    "1": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "ltx-2.3-22b-dev-nvfp4.safetensors" } },
+    "2": { class_type: "LTXAVTextEncoderLoader", inputs: { text_encoder: "gemma_3_12B_it_fpmixed.safetensors", ckpt_name: "ltx-2.3-22b-dev-nvfp4.safetensors", device: "default" } },
+    "3": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: prompt } },
+    "4": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: NEGATIVE_VIDEO } },
+    "20": { class_type: "LoadImage", inputs: { image: startImg } },
+    "21": { class_type: "ImageScale", inputs: { image: ["20", 0], width, height, upscale_method: "lanczos", crop: "center" } },
+    "24": { class_type: "LoadImage", inputs: { image: endImg } },
+    "25": { class_type: "ImageScale", inputs: { image: ["24", 0], width, height, upscale_method: "lanczos", crop: "center" } },
+    "5": { class_type: "EmptyLTXVLatentVideo", inputs: { width, height, length, batch_size: 1 } },
+    "23": { class_type: "LTXVFirstLastFrameControl_TTP", inputs: { vae: ["1", 2], latent: ["5", 0], first_strength: 0.7, last_strength: 0.7, first_image: ["21", 0], last_image: ["25", 0] } },
+    "7": { class_type: "LTXVScheduler", inputs: { steps: 12, max_shift: 2.05, base_shift: 0.95, stretch: true, terminal: 0.1 } },
+    "8": { class_type: "KSamplerSelect", inputs: { sampler_name: "euler" } },
+    "9": {
+      class_type: "SamplerCustom",
+      inputs: {
+        model: ["1", 0], positive: ["3", 0], negative: ["4", 0],
+        sampler: ["8", 0], sigmas: ["7", 0], latent_image: ["23", 0],
+        add_noise: true, noise_seed: seed, cfg: 3.0,
+      },
+    },
+  };
+  if (audioRef && audioRef.length > 0) {
+    // 音频流程: 31 (LTXVAudioVAELoader) + 32 (LoadAudio) + 33 (LTXVReferenceAudio) + 34 (LTX2AudioLatentNormalizingSampling)
+    // 注意: 这里 node 23 已被 LTXVFirstLastFrameControl_TTP 占用, 改用 31/32/33/34 给 audio 节点
+    wf["31"] = { class_type: "LTXVAudioVAELoader", inputs: { ckpt_name: "ltx-2.3-22b-dev-nvfp4.safetensors" } };
+    wf["32"] = { class_type: "LoadAudio", inputs: { audio: audioRef } };
+    wf["33"] = { class_type: "LTXVReferenceAudio", inputs: { model: ["1", 0], positive: ["3", 0], negative: ["4", 0], reference_audio: ["32", 0], audio_vae: ["31", 0], identity_guidance_scale: 3.0, start_percent: 0.0, end_percent: 1.0 } };
+    wf["34"] = { class_type: "LTX2AudioLatentNormalizingSampling", inputs: { model: ["1", 0], audio_normalization_factors: "1,1,0.25,1,1,0.25,1,1" } };
+    wf["10"] = { class_type: "VAEDecode", inputs: { samples: ["9", 0], vae: ["1", 2] } };
+    wf["11"] = { class_type: "VHS_VideoCombine", inputs: { images: ["10", 0], frame_rate: 24, loop_count: 0, filename_prefix: "toonflow_nvfp4_startend_audio", format: "video/h264-mp4", pingpong: false, save_output: true, audio: ["32", 0] } };
+  } else {
+    wf["10"] = { class_type: "VAEDecode", inputs: { samples: ["9", 0], vae: ["1", 2] } };
+    wf["11"] = { class_type: "VHS_VideoCombine", inputs: { images: ["10", 0], frame_rate: 24, loop_count: 0, filename_prefix: "toonflow_nvfp4_startend", format: "video/h264-mp4", pingpong: false, save_output: true } };
+  }
+  return wf;
+}
+
 // ---- A-5: LTX-2.3 Licon-VBVR 多图参考视频 ----
 function buildLtx2_3LiconVBVR(prompt: string, width: number, height: number, length: number, seed: number, refImages: string[]): any {
   // 22B + Licon-VBVR LoRA + LiconMSR 节点(支持 1-4 张图 + background)
@@ -1908,6 +1969,12 @@ const videoRequest = async (config: VideoConfig, model: VideoModel): Promise<str
       // 2026-08-15: IC-LoRA motion track (ref 图 + 运动参考图, imageReference:2)
       if (imageRefs.length < 2) throw new Error("ltx2.3-ic-motion-track 需要 imageReference:2 (ref 图 + 运动参考图)");
       wf = buildLtx2_3ICMotionTrack(config.prompt, w, h, length, seed, imageRefs[0], imageRefs[1]);
+      break;
+    case "ltx2.3-nvfp4-startend":
+      // 2026-08-15 v9: 22B nvfp4 (无 distilled lora) + 真首尾帧 + 8 步快速 + 可选 audio
+      // 禁用 ltx 2.3 distilled lora 后的首尾帧替代方案 (P0 验证 nvfp4 5s 动作自然协调)
+      if (!startImg || !endImg) throw new Error("ltx2.3-nvfp4-startend 需要首尾图 (startImg + endImg)");
+      wf = buildLtx2_3Nvfp4StartEnd(config.prompt, w, h, length, seed, startImg, endImg, audioRefs[0] || null);
       break;
     case "svd-i2v":
       // 2026-08-15: SVD 图生视频 (singleImage)
