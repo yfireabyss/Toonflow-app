@@ -323,6 +323,19 @@ const vendor: VendorConfig = {
       ],
     },
     {
+      // 2026-08-15 v9 P2: 22B fp8 满血 (无 distilled lora) + 真首尾帧 + 20 步 + 可选 audio
+      // 替代 ltx2.3-truly-startend (22B fp8 + distilled lora) — 禁 distilled lora 后的 fp8 满血方案
+      // 与 ltx2.3-nvfp4-startend 对比: ckpt 改 fp8 (满血, 显存需求高) + 步数 20 (满血默认)
+      name: "LTX-2.3 fp8 真首尾帧 (22B 满血, 20 步, 禁 distilled lora, 可选 audio)",
+      modelName: "ltx2.3-fp8-startend",
+      type: "video",
+      mode: ["startEndRequired", "audioOptional"],
+      audio: true,
+      durationResolutionMap: [
+        { duration: [5, 8, 10, 12, 15, 20, 25], resolution: ["480p", "720p"] },
+      ],
+    },
+    {
       name: "LTX-2.3 视频修复 (22B fp8 + SeedVR2)",
       modelName: "ltx2.3-repair",
       type: "video",
@@ -1439,6 +1452,48 @@ function buildLtx2_3Nvfp4StartEnd(prompt: string, width: number, height: number,
   return wf;
 }
 
+// ---- A-4c: LTX-2.3 fp8 真首尾帧 (满血 22B, 不带 distilled lora) ----
+function buildLtx2_3Fp8StartEnd(prompt: string, width: number, height: number, length: number, seed: number, startImg: string, endImg: string, audioRef: string | null): any {
+  // 2026-08-15 v9 P2 主人新指令: 22B fp8 满血版 (不带 distilled lora) 替代 truly-startend
+  // 与 A-4b ltx2.3-nvfp4-startend 唯一区别: ckpt 改 fp8 (8-bit 满血) + 步数改 20 (满血版默认)
+  // 节点链: 22B fp8 + gemma + EmptyLTXVLatentVideo + 首末帧 (强度 0.7 软锚) + LTXVScheduler 20 步 + KSampler + VAEDecode + (可选)audio
+  // audio 流程同 A-4b (audioRef 非空则加 LTXVReferenceAudio)
+  const wf: any = {
+    "1": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors" } },
+    "2": { class_type: "LTXAVTextEncoderLoader", inputs: { text_encoder: "gemma_3_12B_it_fpmixed.safetensors", ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors", device: "default" } },
+    "3": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: prompt } },
+    "4": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: NEGATIVE_VIDEO } },
+    "20": { class_type: "LoadImage", inputs: { image: startImg } },
+    "21": { class_type: "ImageScale", inputs: { image: ["20", 0], width, height, upscale_method: "lanczos", crop: "center" } },
+    "24": { class_type: "LoadImage", inputs: { image: endImg } },
+    "25": { class_type: "ImageScale", inputs: { image: ["24", 0], width, height, upscale_method: "lanczos", crop: "center" } },
+    "5": { class_type: "EmptyLTXVLatentVideo", inputs: { width, height, length, batch_size: 1 } },
+    "23": { class_type: "LTXVFirstLastFrameControl_TTP", inputs: { vae: ["1", 2], latent: ["5", 0], first_strength: 0.7, last_strength: 0.7, first_image: ["21", 0], last_image: ["25", 0] } },
+    "7": { class_type: "LTXVScheduler", inputs: { steps: 20, max_shift: 2.05, base_shift: 0.95, stretch: true, terminal: 0.1 } },
+    "8": { class_type: "KSamplerSelect", inputs: { sampler_name: "euler" } },
+    "9": {
+      class_type: "SamplerCustom",
+      inputs: {
+        model: ["1", 0], positive: ["3", 0], negative: ["4", 0],
+        sampler: ["8", 0], sigmas: ["7", 0], latent_image: ["23", 0],
+        add_noise: true, noise_seed: seed, cfg: 3.0,
+      },
+    },
+  };
+  if (audioRef && audioRef.length > 0) {
+    wf["31"] = { class_type: "LTXVAudioVAELoader", inputs: { ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors" } };
+    wf["32"] = { class_type: "LoadAudio", inputs: { audio: audioRef } };
+    wf["33"] = { class_type: "LTXVReferenceAudio", inputs: { model: ["1", 0], positive: ["3", 0], negative: ["4", 0], reference_audio: ["32", 0], audio_vae: ["31", 0], identity_guidance_scale: 3.0, start_percent: 0.0, end_percent: 1.0 } };
+    wf["34"] = { class_type: "LTX2AudioLatentNormalizingSampling", inputs: { model: ["1", 0], audio_normalization_factors: "1,1,0.25,1,1,0.25,1,1" } };
+    wf["10"] = { class_type: "VAEDecode", inputs: { samples: ["9", 0], vae: ["1", 2] } };
+    wf["11"] = { class_type: "VHS_VideoCombine", inputs: { images: ["10", 0], frame_rate: 24, loop_count: 0, filename_prefix: "toonflow_fp8_startend_audio", format: "video/h264-mp4", pingpong: false, save_output: true, audio: ["32", 0] } };
+  } else {
+    wf["10"] = { class_type: "VAEDecode", inputs: { samples: ["9", 0], vae: ["1", 2] } };
+    wf["11"] = { class_type: "VHS_VideoCombine", inputs: { images: ["10", 0], frame_rate: 24, loop_count: 0, filename_prefix: "toonflow_fp8_startend", format: "video/h264-mp4", pingpong: false, save_output: true } };
+  }
+  return wf;
+}
+
 // ---- A-5: LTX-2.3 Licon-VBVR 多图参考视频 ----
 function buildLtx2_3LiconVBVR(prompt: string, width: number, height: number, length: number, seed: number, refImages: string[]): any {
   // 22B + Licon-VBVR LoRA + LiconMSR 节点(支持 1-4 张图 + background)
@@ -1975,6 +2030,13 @@ const videoRequest = async (config: VideoConfig, model: VideoModel): Promise<str
       // 禁用 ltx 2.3 distilled lora 后的首尾帧替代方案 (P0 验证 nvfp4 5s 动作自然协调)
       if (!startImg || !endImg) throw new Error("ltx2.3-nvfp4-startend 需要首尾图 (startImg + endImg)");
       wf = buildLtx2_3Nvfp4StartEnd(config.prompt, w, h, length, seed, startImg, endImg, audioRefs[0] || null);
+      break;
+    case "ltx2.3-fp8-startend":
+      // 2026-08-15 v9 P2: 22B fp8 满血 (无 distilled lora) + 真首尾帧 + 20 步 + 可选 audio
+      // 与 ltx2.3-nvfp4-startend 唯一区别: ckpt fp8 (满血) + 步数 20 (满血默认)
+      // 替代 ltx2.3-truly-startend (22B fp8 + distilled lora 加载) — 禁 distilled lora 后的 fp8 满血方案
+      if (!startImg || !endImg) throw new Error("ltx2.3-fp8-startend 需要首尾图 (startImg + endImg)");
+      wf = buildLtx2_3Fp8StartEnd(config.prompt, w, h, length, seed, startImg, endImg, audioRefs[0] || null);
       break;
     case "svd-i2v":
       // 2026-08-15: SVD 图生视频 (singleImage)
