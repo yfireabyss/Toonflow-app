@@ -438,6 +438,27 @@ const vendor: VendorConfig = {
         { duration: [5, 8, 10, 12, 15], resolution: ["480p", "720p"] },
       ],
     },
+    // 2026-08-16 mavis v10: 加 6/8 张 ref 版本 (双 LiconMSR 串联)
+    {
+      name: "LTX-2.3 Licon-VBVR 6 张 ref (双 LiconMSR 4+2 串联)",
+      modelName: "ltx2.3-licon-vbvr6",
+      type: "video",
+      mode: ["imageReference:6"],
+      audio: false,
+      durationResolutionMap: [
+        { duration: [5, 8, 10, 12, 15], resolution: ["480p", "720p"] },
+      ],
+    },
+    {
+      name: "LTX-2.3 Licon-VBVR 8 张 ref (双 LiconMSR 4+4 串联)",
+      modelName: "ltx2.3-licon-vbvr8",
+      type: "video",
+      mode: ["imageReference:8"],
+      audio: false,
+      durationResolutionMap: [
+        { duration: [5, 8, 10, 12, 15], resolution: ["480p", "720p"] },
+      ],
+    },
     // ---- B 档 (5 个) ----
     {
       name: "LTX-2.3 IC-LoRA union-control (22B + union LoRA + depth/pose/canny)",
@@ -1555,6 +1576,7 @@ function buildLtx2_3Fp8StartEnd8Step(prompt: string, width: number, height: numb
 function buildLtx2_3LiconVBVR(prompt: string, width: number, height: number, length: number, seed: number, refImages: string[]): any {
   // 22B + Licon-VBVR LoRA + LiconMSR 节点(支持 1-4 张图 + background)
   // refImages: 1-4 张 ref 图（按顺序填到 1/2/3/4）
+  // 2026-08-16 mavis: 修 frame_count=41 hardcode bug, 改为 length*24+1 跟 length 走 (10s → 241 帧)
   const wf: any = {
     "1": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors" } },
     "2": { class_type: "LTXAVTextEncoderLoader", inputs: { text_encoder: "gemma_3_12B_it_fpmixed.safetensors", ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors", device: "default" } },
@@ -1570,7 +1592,8 @@ function buildLtx2_3LiconVBVR(prompt: string, width: number, height: number, len
     wf[String(scaleId)] = { class_type: "ImageScale", inputs: { image: [String(loadId), 0], width, height, upscale_method: "lanczos", crop: "center" } };
   }
   // LiconMSR 节点: width/height/frame_count + 1/2/3/4 (4 张 ref 图) + background
-  const liconInput: any = { width, height, frame_count: "41" };
+  // frame_count = length * 24 + 1 (24fps, +1 给首帧)
+  const liconInput: any = { width, height, frame_count: String(length * 24 + 1) };
   for (let i = 0; i < Math.min(4, refImages.length); i++) {
     const scaleId = 11 + i * 2;
     liconInput[String(i + 1)] = [String(scaleId), 0];
@@ -1589,6 +1612,106 @@ function buildLtx2_3LiconVBVR(prompt: string, width: number, height: number, len
   };
   wf["10"] = { class_type: "VAEDecode", inputs: { samples: ["9", 0], vae: ["1", 2] } };
   wf["11"] = { class_type: "VHS_VideoCombine", inputs: { images: ["10", 0], frame_rate: 24, loop_count: 0, filename_prefix: "toonflow_vbvr", format: "video/h264-mp4", pingpong: false, save_output: true } };
+  return wf;
+}
+
+// ---- A-5b: LTX-2.3 Licon-VBVR 6 张 ref (双 LiconMSR 串联, 2026-08-16 mavis v10) ----
+function buildLtx2_3LiconVBVR6(prompt: string, width: number, height: number, length: number, seed: number, refImages: string[]): any {
+  // 22B + Licon-VBVR LoRA + 2x LiconMSR 节点串联 (前 4 张 + 后 2 张 + background, 总 6 张 ref)
+  // refImages: 6 张 ref 图 (前 4 喂 node1, 后 2 喂 node2)
+  // LatentBatch 节点拼接 2 个 LiconMSR 输出的 latent
+  const wf: any = {
+    "1": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors" } },
+    "2": { class_type: "LTXAVTextEncoderLoader", inputs: { text_encoder: "gemma_3_12B_it_fpmixed.safetensors", ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors", device: "default" } },
+    "3": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: prompt } },
+    "4": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: NEGATIVE_VIDEO } },
+    "5": { class_type: "LTXICLoRALoaderModelOnly", inputs: { model: ["1", 0], lora_name: "Ltx2.3-Licon-VBVR-I2V-240K-R32.safetensors", strength_model: 1.0 } },
+  };
+  // 加载 6 张 ref 图 (node10/12/14/16/18/20 LoadImage, node11/13/15/17/19/21 ImageScale)
+  for (let i = 0; i < 6; i++) {
+    const loadId = 10 + i * 2;
+    const scaleId = 11 + i * 2;
+    wf[String(loadId)] = { class_type: "LoadImage", inputs: { image: refImages[i] } };
+    wf[String(scaleId)] = { class_type: "ImageScale", inputs: { image: [String(loadId), 0], width, height, upscale_method: "lanczos", crop: "center" } };
+  }
+  // LiconMSR 节点 1: 前 4 张 ref (sb index 0-3)
+  const licon1Input: any = { width, height, frame_count: String(length * 12 + 1) };
+  for (let i = 0; i < 4; i++) {
+    const scaleId = 11 + i * 2;
+    licon1Input[String(i + 1)] = [String(scaleId), 0];
+  }
+  wf["30"] = { class_type: "LiconMSR", inputs: licon1Input };
+  // LiconMSR 节点 2: 后 2 张 ref (sb index 4-5)
+  const licon2Input: any = { width, height, frame_count: String(length * 12 + 1) };
+  for (let i = 0; i < 2; i++) {
+    const scaleId = 11 + (4 + i) * 2;
+    licon2Input[String(i + 1)] = [String(scaleId), 0];
+  }
+  wf["31"] = { class_type: "LiconMSR", inputs: licon2Input };
+  // LatentBatch 拼接 2 个 LiconMSR 输出的 latent
+  wf["32"] = { class_type: "LatentBatch", inputs: { samples1: ["30", 3], samples2: ["31", 3] } };
+  // 合并 positive / negative (用 licon1 的)
+  // 简化: 直接用 licon1 的 model + positive + negative (实测可行)
+  wf["7"] = { class_type: "LTXVScheduler", inputs: { steps: 20, max_shift: 2.05, base_shift: 0.95, stretch: true, terminal: 0.1 } };
+  wf["8"] = { class_type: "KSamplerSelect", inputs: { sampler_name: "euler" } };
+  wf["9"] = {
+    class_type: "SamplerCustom",
+    inputs: {
+      model: ["30", 0], positive: ["30", 1], negative: ["30", 2],
+      sampler: ["8", 0], sigmas: ["7", 0], latent_image: ["32", 0],
+      add_noise: true, noise_seed: seed, cfg: 3.0,
+    },
+  };
+  wf["10"] = { class_type: "VAEDecode", inputs: { samples: ["9", 0], vae: ["1", 2] } };
+  wf["11"] = { class_type: "VHS_VideoCombine", inputs: { images: ["10", 0], frame_rate: 24, loop_count: 0, filename_prefix: "toonflow_vbvr6", format: "video/h264-mp4", pingpong: false, save_output: true } };
+  return wf;
+}
+
+// ---- A-5c: LTX-2.3 Licon-VBVR 8 张 ref (双 LiconMSR 串联 4+4, 2026-08-16 mavis v10) ----
+function buildLtx2_3LiconVBVR8(prompt: string, width: number, height: number, length: number, seed: number, refImages: string[]): any {
+  // 22B + Licon-VBVR LoRA + 2x LiconMSR 节点串联 (前 4 + 后 4, 总 8 张 ref)
+  const wf: any = {
+    "1": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors" } },
+    "2": { class_type: "LTXAVTextEncoderLoader", inputs: { text_encoder: "gemma_3_12B_it_fpmixed.safetensors", ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors", device: "default" } },
+    "3": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: prompt } },
+    "4": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: NEGATIVE_VIDEO } },
+    "5": { class_type: "LTXICLoRALoaderModelOnly", inputs: { model: ["1", 0], lora_name: "Ltx2.3-Licon-VBVR-I2V-240K-R32.safetensors", strength_model: 1.0 } },
+  };
+  // 加载 8 张 ref 图 (node10-24 LoadImage, node11-25 ImageScale)
+  for (let i = 0; i < 8; i++) {
+    const loadId = 10 + i * 2;
+    const scaleId = 11 + i * 2;
+    wf[String(loadId)] = { class_type: "LoadImage", inputs: { image: refImages[i] } };
+    wf[String(scaleId)] = { class_type: "ImageScale", inputs: { image: [String(loadId), 0], width, height, upscale_method: "lanczos", crop: "center" } };
+  }
+  // LiconMSR 节点 1: 前 4 张 ref
+  const licon1Input: any = { width, height, frame_count: String(length * 12 + 1) };
+  for (let i = 0; i < 4; i++) {
+    const scaleId = 11 + i * 2;
+    licon1Input[String(i + 1)] = [String(scaleId), 0];
+  }
+  wf["30"] = { class_type: "LiconMSR", inputs: licon1Input };
+  // LiconMSR 节点 2: 后 4 张 ref
+  const licon2Input: any = { width, height, frame_count: String(length * 12 + 1) };
+  for (let i = 0; i < 4; i++) {
+    const scaleId = 11 + (4 + i) * 2;
+    licon2Input[String(i + 1)] = [String(scaleId), 0];
+  }
+  wf["31"] = { class_type: "LiconMSR", inputs: licon2Input };
+  // LatentBatch 拼接 2 个 LiconMSR 输出的 latent
+  wf["32"] = { class_type: "LatentBatch", inputs: { samples1: ["30", 3], samples2: ["31", 3] } };
+  wf["7"] = { class_type: "LTXVScheduler", inputs: { steps: 20, max_shift: 2.05, base_shift: 0.95, stretch: true, terminal: 0.1 } };
+  wf["8"] = { class_type: "KSamplerSelect", inputs: { sampler_name: "euler" } };
+  wf["9"] = {
+    class_type: "SamplerCustom",
+    inputs: {
+      model: ["30", 0], positive: ["30", 1], negative: ["30", 2],
+      sampler: ["8", 0], sigmas: ["7", 0], latent_image: ["32", 0],
+      add_noise: true, noise_seed: seed, cfg: 3.0,
+    },
+  };
+  wf["10"] = { class_type: "VAEDecode", inputs: { samples: ["9", 0], vae: ["1", 2] } };
+  wf["11"] = { class_type: "VHS_VideoCombine", inputs: { images: ["10", 0], frame_rate: 24, loop_count: 0, filename_prefix: "toonflow_vbvr8", format: "video/h264-mp4", pingpong: false, save_output: true } };
   return wf;
 }
 
@@ -1960,6 +2083,15 @@ const imageRequest = async (config: ImageConfig, model: ImageModel): Promise<str
         break;
       case "flux2-turbo-lora":
         wf = buildFlux2TurboLora(config.prompt, w, h, seed);
+        break;
+      // 2026-08-16 mavis v10: licon-vbvr 6/8 张 ref 多参支持
+      case "ltx2.3-licon-vbvr6":
+        if (imageRefs.length < 6) throw new Error("ltx2.3-licon-vbvr6 需要 imageReference:6 (6 张 ref)");
+        wf = buildLtx2_3LiconVBVR6(config.prompt, w, h, length, seed, imageRefs);
+        break;
+      case "ltx2.3-licon-vbvr8":
+        if (imageRefs.length < 8) throw new Error("ltx2.3-licon-vbvr8 需要 imageReference:8 (8 张 ref)");
+        wf = buildLtx2_3LiconVBVR8(config.prompt, w, h, length, seed, imageRefs);
         break;
       default:
         throw new Error(`未知 image model: ${model.modelName}`);
