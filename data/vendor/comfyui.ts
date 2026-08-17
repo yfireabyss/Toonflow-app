@@ -450,6 +450,16 @@ const vendor: VendorConfig = {
       ],
     },
     {
+      name: "LTX-2.3 IC-LoRA union-control 6 ref timeline (22B + 6 串联 guide 节点, 1 段多参生视频)",
+      modelName: "ltx2.3-ic-union-control-6ref",
+      type: "video",
+      mode: ["imageReference:6"],
+      audio: false,
+      durationResolutionMap: [
+        { duration: [5, 10, 15, 20, 25], resolution: ["480p", "720p"] },
+      ],
+    },
+    {
       name: "LTX-2.3 IC-LoRA motion-track (22B + motion LoRA + 运动参考)",
       modelName: "ltx2.3-ic-motion-track",
       type: "video",
@@ -1623,6 +1633,88 @@ function buildLtx2_3ICUnionControl(prompt: string, width: number, height: number
   };
 }
 
+// ---- B-1b: LTX-2.3 IC-LoRA union-control 6 ref timeline (串联 6 个 guide 节点) ----
+// 2026-08-17: 真"1 段 6 张 ref 参考图生视频" — 跟 v12 5 段拼接的本质区别
+// 6 个 LTXAddVideoICLoRAGuideAdvanced 节点串联, 每个挂不同 ref 图 + 不同 frame_idx
+// 视频生成时, 6 张 ref 在不同时间点引导 IC-LoRA attention
+function buildLtx2_3ICUnionControl6Ref(prompt: string, width: number, height: number, length: number, seed: number, refImages: string[]): any {
+  // 6 张 ref 均匀分布在视频帧上 (24fps × length 帧)
+  // 0, length*0.2, length*0.4, length*0.6, length*0.8, length-20
+  const FRAME_IDX = [
+    0,
+    Math.floor(length * 0.2),
+    Math.floor(length * 0.4),
+    Math.floor(length * 0.6),
+    Math.floor(length * 0.8),
+    Math.max(0, length - 20),
+  ];
+  const wf: any = {
+    "1": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors" } },
+    "2": { class_type: "LTXAVTextEncoderLoader", inputs: { text_encoder: "gemma_3_12B_it_fpmixed.safetensors", ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors", device: "default" } },
+    "3": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: prompt } },
+    "4": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: NEGATIVE_VIDEO } },
+    "5": { class_type: "LTXICLoRALoaderModelOnly", inputs: { model: ["1", 0], lora_name: "ltx-2.3-22b-ic-lora-union-control-ref0.5.safetensors", strength_model: 1.0 } },
+  };
+  // 加载 6 张 ref 图 (按 0-5 顺序填)
+  for (let i = 0; i < 6; i++) {
+    const loadId = 10 + i * 2;
+    const scaleId = 11 + i * 2;
+    wf[String(loadId)] = { class_type: "LoadImage", inputs: { image: refImages[i] } };
+    wf[String(scaleId)] = { class_type: "ImageScale", inputs: { image: [String(loadId), 0], width, height, upscale_method: "lanczos", crop: "center" } };
+  }
+  // 空 latent (25s × 24fps = 600 帧)
+  wf["30"] = { class_type: "EmptyLTXVLatentVideo", inputs: { width, height, length, batch_size: 1 } };
+  // 6 个 LTXAddVideoICLoRAGuideAdvanced 串联 (前一个输出 → 后一个输入)
+  // 输出 3-tuple: [positive, negative, latent]
+  let prevPos = "3", prevNeg = "4", prevLat = "30";
+  for (let i = 0; i < 6; i++) {
+    const nodeId = 31 + i;
+    const scaleId = 11 + i * 2;
+    wf[String(nodeId)] = {
+      class_type: "LTXAddVideoICLoRAGuideAdvanced",
+      inputs: {
+        positive: [prevPos, 0],
+        negative: [prevNeg, 0],
+        vae: ["1", 2],
+        latent: [prevLat, 0],
+        image: [String(scaleId), 0],
+        frame_idx: FRAME_IDX[i],
+        strength: 0.7,
+        latent_downscale_factor: 1.0,
+        crop: "disabled",
+        use_tiled_encode: false,
+        tile_size: 256,
+        tile_overlap: 64,
+        attention_strength: 0.7,
+      },
+    };
+    prevPos = String(nodeId);
+    prevNeg = String(nodeId);
+    prevLat = String(nodeId);
+  }
+  // scheduler + sampler (跟 ic-union-control 单图同款 20 步)
+  wf["7"] = { class_type: "LTXVScheduler", inputs: { steps: 20, max_shift: 2.05, base_shift: 0.95, stretch: true, terminal: 0.1 } };
+  wf["8"] = { class_type: "KSamplerSelect", inputs: { sampler_name: "euler" } };
+  // 末节点输出 latent 是 index 2
+  wf["9"] = {
+    class_type: "SamplerCustom",
+    inputs: {
+      model: ["5", 0],
+      positive: [prevPos, 0],
+      negative: [prevNeg, 0],
+      sampler: ["8", 0],
+      sigmas: ["7", 0],
+      latent_image: [prevLat, 2],
+      add_noise: true,
+      noise_seed: seed,
+      cfg: 3.0,
+    },
+  };
+  wf["10"] = { class_type: "VAEDecode", inputs: { samples: ["9", 0], vae: ["1", 2] } };
+  wf["11"] = { class_type: "VHS_VideoCombine", inputs: { images: ["10", 0], frame_rate: 24, loop_count: 0, filename_prefix: "toonflow_ic_union_6ref", format: "video/h264-mp4", pingpong: false, save_output: true } };
+  return wf;
+}
+
 // ---- B-2: LTX-2.3 IC-LoRA motion-track 镜头运动控制 ----
 function buildLtx2_3ICMotionTrack(prompt: string, width: number, height: number, length: number, seed: number, refImage: string, motionImage: string): any {
   // 22B + motion-track-control LoRA + ref 图 + 运动参考图(通常 2-3 帧拼接)
@@ -2076,6 +2168,11 @@ const videoRequest = async (config: VideoConfig, model: VideoModel): Promise<str
       // 2026-08-15: IC-LoRA union control (ref 图 + control 图, imageReference:2)
       if (imageRefs.length < 2) throw new Error("ltx2.3-ic-union-control 需要 imageReference:2 (ref 图 + control 图)");
       wf = buildLtx2_3ICUnionControl(config.prompt, w, h, length, seed, imageRefs[0], imageRefs[1]);
+      break;
+    case "ltx2.3-ic-union-control-6ref":
+      // 2026-08-17: 真"1 段 6 张 ref 参考图生视频" (imageReference:6, 串联 6 个 guide 节点)
+      if (imageRefs.length !== 6) throw new Error("ltx2.3-ic-union-control-6ref 需要 6 张 ref 图 (imageReference:6)");
+      wf = buildLtx2_3ICUnionControl6Ref(config.prompt, w, h, length, seed, imageRefs);
       break;
     case "ltx2.3-ic-motion-track":
       // 2026-08-15: IC-LoRA motion track (ref 图 + 运动参考图, imageReference:2)
