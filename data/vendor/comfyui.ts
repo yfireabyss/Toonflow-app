@@ -460,6 +460,21 @@ const vendor: VendorConfig = {
       ],
     },
     {
+      // 2026-08-17 v14: 主人的 3.4 宫格 LTX2.3 短剧工作流
+      // 1 张 4 宫格 ref (2x2 拼图) → 内部 imageSplitGrid 拆 4 张 → LTXVAddGuideMulti 单节点
+      // 4 张 ref 在 4 个 frame_idx 引导 IC-LoRA attention, 1 段 25s 一次性生视频
+      // 跟 v13 6ref 区别: v13 是 6 张独立图, v14 是 1 张 4 宫格拼图 (workflow 内部拆)
+      // 优势: imageReference 只需要 1 张 (不是 6), vendor 内部完成拆图
+      name: "LTX-2.3 4 宫格 1-shot (22B fp8 + 1 张 2x2 拼图 ref, 内部拆 4 张, 单 LTXVAddGuideMulti)",
+      modelName: "ltx2.3-4grid-1shot",
+      type: "video",
+      mode: ["imageReference:1"],
+      audio: false,
+      durationResolutionMap: [
+        { duration: [5, 10, 15, 20, 25], resolution: ["480p", "720p"] },
+      ],
+    },
+    {
       name: "LTX-2.3 IC-LoRA motion-track (22B + motion LoRA + 运动参考)",
       modelName: "ltx2.3-ic-motion-track",
       type: "video",
@@ -1723,6 +1738,96 @@ function buildLtx2_3ICUnionControl6Ref(prompt: string, width: number, height: nu
   return wf;
 }
 
+// ---- B-1c: LTX-2.3 4 宫格 1-shot (1 张 2x2 拼图 ref, 内部拆 4 张, 单 LTXVAddGuideMulti) ----
+// 2026-08-17 v14: 主人的 3.4 宫格 LTX2.3 短剧工作流复刻 (简化版, 不含 audio)
+// 原始工作流: 1 张 2x2 4 宫格图 → easy imageSplitGrid 拆 4 张 → easy imageInsetCrop 去接缝
+//   → 4× (ImageFromBatch → ResizeImagesByLongerEdge → LTXVPreprocess) → LTXVAddGuideMulti 单节点一次性
+// v14 简化: 去掉 ResizeImageMaskNode (原工作流用 1920x1088 mask, 跟 final size 一致时可省),
+//   保留核心 imageSplitGrid + 4×ImageFromBatch + 4×LTXVPreprocess + LTXVAddGuideMulti
+// 关键节点 ID 分配 (避开 ID 冲突):
+//   0-9:   基础 (CheckpointLoader, TextEncoderLoader)
+//   10-19: 加载 (LoadImage, imageSplitGrid, imageInsetCrop)
+//   20-29: 4 个 ImageFromBatch (抽 4 张子图)
+//   30-39: 4 个 LTXVPreprocess
+//   50-59: Latent (EmptyLTXVLatentVideo, LTXVConditioning)
+//   100:   LTXVAddGuideMulti 核心
+//   7-9:   Scheduler/Sampler/SamplerCustom
+//   80-81: VAEDecode + VHS_VideoCombine
+function buildLtx2_34Grid1Shot(prompt: string, width: number, height: number, length: number, seed: number, refImage: string): any {
+  // 4 个 frame_idx 均匀分布: 0, length*0.25, length*0.5, length*0.75
+  // strength 全 0.7 (与原工作流一致)
+  const FRAME_IDX = [
+    0,
+    Math.max(1, Math.floor(length * 0.25)),
+    Math.max(2, Math.floor(length * 0.5)),
+    Math.max(3, Math.floor(length * 0.75)),
+  ];
+  return {
+    "1": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors" } },
+    "2": { class_type: "LTXAVTextEncoderLoader", inputs: { text_encoder: "gemma_3_12B_it_fpmixed.safetensors", ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors", device: "default" } },
+    "3": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: prompt } },
+    "4": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: NEGATIVE_VIDEO } },
+    // 单图加载 → 2x2 拆分 → 2% inset crop 去接缝
+    "10": { class_type: "LoadImage", inputs: { image: refImage } },
+    "11": { class_type: "easy imageSplitGrid", inputs: { images: ["10", 0], row: 2, column: 2 } },
+    "12": { class_type: "easy imageInsetCrop", inputs: { image: ["11", 0], measurement: "Percentage", left: 2, right: 2, top: 2, bottom: 2 } },
+    // 4 张子图抽 batch → LTXVPreprocess
+    "20": { class_type: "ImageFromBatch", inputs: { image: ["12", 0], batch_index: 0, length: 1 } },
+    "21": { class_type: "ImageFromBatch", inputs: { image: ["12", 0], batch_index: 1, length: 1 } },
+    "22": { class_type: "ImageFromBatch", inputs: { image: ["12", 0], batch_index: 2, length: 1 } },
+    "23": { class_type: "ImageFromBatch", inputs: { image: ["12", 0], batch_index: 3, length: 1 } },
+    "30": { class_type: "LTXVPreprocess", inputs: { image: ["20", 0], img_compression: 100 } },
+    "31": { class_type: "LTXVPreprocess", inputs: { image: ["21", 0], img_compression: 100 } },
+    "32": { class_type: "LTXVPreprocess", inputs: { image: ["22", 0], img_compression: 100 } },
+    "33": { class_type: "LTXVPreprocess", inputs: { image: ["23", 0], img_compression: 100 } },
+    // 视频 latent (final size) + conditioning (frame_rate 跟视频 24fps 一致)
+    "50": { class_type: "EmptyLTXVLatentVideo", inputs: { width, height, length, batch_size: 1 } },
+    "51": { class_type: "LTXVConditioning", inputs: { positive: ["3", 0], negative: ["4", 0], frame_rate: 24 } },
+    // 核心: 单节点 LTXVAddGuideMulti 一次接收 4 张 ref + 4 个 frame_idx + 4 个 strength
+    "100": {
+      class_type: "LTXVAddGuideMulti",
+      inputs: {
+        positive: ["51", 0],
+        negative: ["51", 1],
+        vae: ["1", 2],
+        latent: ["50", 0],
+        num_guides: "4",
+        "num_guides.image_1": ["30", 0],
+        "num_guides.frame_idx_1": FRAME_IDX[0],
+        "num_guides.strength_1": 0.7,
+        "num_guides.image_2": ["31", 0],
+        "num_guides.frame_idx_2": FRAME_IDX[1],
+        "num_guides.strength_2": 0.7,
+        "num_guides.image_3": ["32", 0],
+        "num_guides.frame_idx_3": FRAME_IDX[2],
+        "num_guides.strength_3": 0.7,
+        "num_guides.image_4": ["33", 0],
+        "num_guides.frame_idx_4": FRAME_IDX[3],
+        "num_guides.strength_4": 0.7,
+      },
+    },
+    // 老版 pipeline (与 v9-v13 一致, 跑过 100+ 次稳定)
+    "7": { class_type: "LTXVScheduler", inputs: { steps: 20, max_shift: 2.05, base_shift: 0.95, stretch: true, terminal: 0.1 } },
+    "8": { class_type: "KSamplerSelect", inputs: { sampler_name: "euler" } },
+    "9": {
+      class_type: "SamplerCustom",
+      inputs: {
+        model: ["1", 0],
+        positive: ["100", 0],
+        negative: ["100", 1],
+        sampler: ["8", 0],
+        sigmas: ["7", 0],
+        latent_image: ["100", 2],
+        add_noise: true,
+        noise_seed: seed,
+        cfg: 3.0,
+      },
+    },
+    "80": { class_type: "VAEDecode", inputs: { samples: ["9", 0], vae: ["1", 2] } },
+    "81": { class_type: "VHS_VideoCombine", inputs: { images: ["80", 0], frame_rate: 24, loop_count: 0, filename_prefix: "toonflow_4grid_1shot", format: "video/h264-mp4", pingpong: false, save_output: true } },
+  };
+}
+
 // ---- B-2: LTX-2.3 IC-LoRA motion-track 镜头运动控制 ----
 function buildLtx2_3ICMotionTrack(prompt: string, width: number, height: number, length: number, seed: number, refImage: string, motionImage: string): any {
   // 22B + motion-track-control LoRA + ref 图 + 运动参考图(通常 2-3 帧拼接)
@@ -2181,6 +2286,11 @@ const videoRequest = async (config: VideoConfig, model: VideoModel): Promise<str
       // 2026-08-17: 真"1 段 6 张 ref 参考图生视频" (imageReference:6, 串联 6 个 guide 节点)
       if (imageRefs.length !== 6) throw new Error("ltx2.3-ic-union-control-6ref 需要 6 张 ref 图 (imageReference:6)");
       wf = buildLtx2_3ICUnionControl6Ref(config.prompt, w, h, length, seed, imageRefs);
+      break;
+    case "ltx2.3-4grid-1shot":
+      // 2026-08-17 v14: 主人 3.4 宫格 LTX2.3 短剧工作流 (1 张 2x2 拼图 ref, 内部拆 4 张, 单 LTXVAddGuideMulti)
+      if (imageRefs.length < 1) throw new Error("ltx2.3-4grid-1shot 需要 1 张 4 宫格 ref 图 (imageReference:1)");
+      wf = buildLtx2_34Grid1Shot(config.prompt, w, h, length, seed, imageRefs[0]);
       break;
     case "ltx2.3-ic-motion-track":
       // 2026-08-15: IC-LoRA motion track (ref 图 + 运动参考图, imageReference:2)
