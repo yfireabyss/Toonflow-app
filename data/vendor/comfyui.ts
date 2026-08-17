@@ -1668,9 +1668,10 @@ function buildLtx2_3ICUnionControl6Ref(prompt: string, width: number, height: nu
   // 输出 3-tuple: [positive(0), negative(1), latent(2)]
   // 第一节点输入: positive=["3", 0], negative=["4", 0], latent=["30", 0] (latent 来自空 latent node 30, 1-tuple)
   // 后续节点输入: positive=[prev, 0], negative=[prev, 1], latent=[prev, 2]
+  // v13.1: 改为单 guide 节点 (先用第 1 张 ref) 验证基础流程, 跑通后逐步加多张
   let prevPos = "3", prevNeg = "4";
   let prevLatNode = "30", prevLatIdx = 0;  // 初始 latent 来自空 latent (1-tuple)
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 1; i++) {  // v13.1 临时只 1 节点
     const nodeId = 31 + i;
     const scaleId = 11 + i * 2;
     wf[String(nodeId)] = {
