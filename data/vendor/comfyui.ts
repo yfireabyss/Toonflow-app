@@ -1668,10 +1668,10 @@ function buildLtx2_3ICUnionControl6Ref(prompt: string, width: number, height: nu
   // 输出 3-tuple: [positive(0), negative(1), latent(2)]
   // 第一节点输入: positive=["3", 0], negative=["4", 0], latent=["30", 0] (latent 来自空 latent node 30, 1-tuple)
   // 后续节点输入: positive=[prev, 0], negative=[prev, 1], latent=[prev, 2]
-  // v13.1: 改为单 guide 节点 (先用第 1 张 ref) 验证基础流程, 跑通后逐步加多张
+  // v13.2: 节点 ID 改 50/51 避开 ref 图加载, 改回 6 节点串联 (v13 主人要求: 1 段 6 张 ref)
   let prevPos = "3", prevNeg = "4";
   let prevLatNode = "30", prevLatIdx = 0;  // 初始 latent 来自空 latent (1-tuple)
-  for (let i = 0; i < 1; i++) {  // v13.1 临时只 1 节点
+  for (let i = 0; i < 6; i++) {  // v13.2 恢复 6 节点
     const nodeId = 31 + i;
     const scaleId = 11 + i * 2;
     wf[String(nodeId)] = {
@@ -1716,8 +1716,10 @@ function buildLtx2_3ICUnionControl6Ref(prompt: string, width: number, height: nu
       cfg: 3.0,
     },
   };
-  wf["10"] = { class_type: "VAEDecode", inputs: { samples: ["9", 0], vae: ["1", 2] } };
-  wf["11"] = { class_type: "VHS_VideoCombine", inputs: { images: ["10", 0], frame_rate: 24, loop_count: 0, filename_prefix: "toonflow_ic_union_6ref", format: "video/h264-mp4", pingpong: false, save_output: true } };
+  // v13.2: 节点 ID 避开 10-21 范围 (LoadImage/ImageScale 占用), 改成 50/51
+  // 之前 10/11 跟 LoadImage/ImageScale 冲突, 导致 31 image 收到 VHS_FILENAMES
+  wf["50"] = { class_type: "VAEDecode", inputs: { samples: ["9", 0], vae: ["1", 2] } };
+  wf["51"] = { class_type: "VHS_VideoCombine", inputs: { images: ["50", 0], frame_rate: 24, loop_count: 0, filename_prefix: "toonflow_ic_union_6ref", format: "video/h264-mp4", pingpong: false, save_output: true } };
   return wf;
 }
 
