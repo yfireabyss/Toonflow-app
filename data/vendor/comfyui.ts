@@ -2091,7 +2091,7 @@ const videoRequest = async (config: VideoConfig, model: VideoModel): Promise<str
   const allRefs = config.referenceList || [];
   for (let i = 0; i < allRefs.length; i++) {
     const r = allRefs[i];
-    if (r.type === "image" && imageRefs.length < 5) {
+    if (r.type === "image" && imageRefs.length < 8) {
       const upName = await comfyUploadImage(r.base64, `ref_${Date.now()}_${imageRefs.length}.png`);
       imageRefs.push(upName);
     } else if (r.type === "audio" && audioRefs.length < 2) {
