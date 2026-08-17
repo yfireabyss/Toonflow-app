@@ -1754,15 +1754,16 @@ function buildLtx2_3ICUnionControl6Ref(prompt: string, width: number, height: nu
 //   7-9:   Scheduler/Sampler/SamplerCustom
 //   80-81: VAEDecode + VHS_VideoCombine
 function buildLtx2_34Grid1Shot(prompt: string, width: number, height: number, length: number, seed: number, refImage: string): any {
-  // v14.1 (2026-08-17): frame_idx 末帧锁死 BR + strength 1.0
-  // 4 个 frame_idx 分布: 0, length/3, length*2/3, length-1
-  //   0 → TL (初始状态)  1/3 → TR (早期)  2/3 → BL (中期)  length-1 → BR (终态锁死)
+  // v14.1.1 (2026-08-17): 末帧锁 BR 但避开 LTX VAE 8x temporal 越界
+  //   关键: latent_length = (length - 1) // 8 + 1 (LTX VAE 8x temporal)
+  //   末帧 latent 索引 = latent_length - 1 → 对应视频帧 (latent_length - 1) * 8
+  //   但更直接: frame_idx_4 = length - 8, 既接近末帧又留 8 帧 buffer
   // strength 全 1.0 (跟 v7 经验 14 truly-startend-strong 一致, 锁死每段避免 0.7 strength 黑屏)
   const FRAME_IDX = [
     0,
     Math.max(1, Math.floor(length / 3)),
     Math.max(2, Math.floor((length * 2) / 3)),
-    Math.max(3, length - 1),
+    Math.max(3, length - 8),
   ];
   return {
     "1": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors" } },
