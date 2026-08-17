@@ -1754,13 +1754,15 @@ function buildLtx2_3ICUnionControl6Ref(prompt: string, width: number, height: nu
 //   7-9:   Scheduler/Sampler/SamplerCustom
 //   80-81: VAEDecode + VHS_VideoCombine
 function buildLtx2_34Grid1Shot(prompt: string, width: number, height: number, length: number, seed: number, refImage: string): any {
-  // 4 个 frame_idx 均匀分布: 0, length*0.25, length*0.5, length*0.75
-  // strength 全 0.7 (与原工作流一致)
+  // v14.1 (2026-08-17): frame_idx 末帧锁死 BR + strength 1.0
+  // 4 个 frame_idx 分布: 0, length/3, length*2/3, length-1
+  //   0 → TL (初始状态)  1/3 → TR (早期)  2/3 → BL (中期)  length-1 → BR (终态锁死)
+  // strength 全 1.0 (跟 v7 经验 14 truly-startend-strong 一致, 锁死每段避免 0.7 strength 黑屏)
   const FRAME_IDX = [
     0,
-    Math.max(1, Math.floor(length * 0.25)),
-    Math.max(2, Math.floor(length * 0.5)),
-    Math.max(3, Math.floor(length * 0.75)),
+    Math.max(1, Math.floor(length / 3)),
+    Math.max(2, Math.floor((length * 2) / 3)),
+    Math.max(3, length - 1),
   ];
   return {
     "1": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors" } },
@@ -1794,16 +1796,16 @@ function buildLtx2_34Grid1Shot(prompt: string, width: number, height: number, le
         num_guides: "4",
         "num_guides.image_1": ["30", 0],
         "num_guides.frame_idx_1": FRAME_IDX[0],
-        "num_guides.strength_1": 0.7,
+        "num_guides.strength_1": 1.0,
         "num_guides.image_2": ["31", 0],
         "num_guides.frame_idx_2": FRAME_IDX[1],
-        "num_guides.strength_2": 0.7,
+        "num_guides.strength_2": 1.0,
         "num_guides.image_3": ["32", 0],
         "num_guides.frame_idx_3": FRAME_IDX[2],
-        "num_guides.strength_3": 0.7,
+        "num_guides.strength_3": 1.0,
         "num_guides.image_4": ["33", 0],
         "num_guides.frame_idx_4": FRAME_IDX[3],
-        "num_guides.strength_4": 0.7,
+        "num_guides.strength_4": 1.0,
       },
     },
     // 老版 pipeline (与 v9-v13 一致, 跑过 100+ 次稳定)
