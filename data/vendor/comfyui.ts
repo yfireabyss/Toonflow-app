@@ -1665,8 +1665,11 @@ function buildLtx2_3ICUnionControl6Ref(prompt: string, width: number, height: nu
   // 空 latent (25s × 24fps = 600 帧)
   wf["30"] = { class_type: "EmptyLTXVLatentVideo", inputs: { width, height, length, batch_size: 1 } };
   // 6 个 LTXAddVideoICLoRAGuideAdvanced 串联 (前一个输出 → 后一个输入)
-  // 输出 3-tuple: [positive, negative, latent]
-  let prevPos = "3", prevNeg = "4", prevLat = "30";
+  // 输出 3-tuple: [positive(0), negative(1), latent(2)]
+  // 第一节点输入: positive=["3", 0], negative=["4", 0], latent=["30", 0] (latent 来自空 latent node 30, 1-tuple)
+  // 后续节点输入: positive=[prev, 0], negative=[prev, 1], latent=[prev, 2]
+  let prevPos = "3", prevNeg = "4";
+  let prevLatNode = "30", prevLatIdx = 0;  // 初始 latent 来自空 latent (1-tuple)
   for (let i = 0; i < 6; i++) {
     const nodeId = 31 + i;
     const scaleId = 11 + i * 2;
@@ -1676,7 +1679,7 @@ function buildLtx2_3ICUnionControl6Ref(prompt: string, width: number, height: nu
         positive: [prevPos, 0],
         negative: [prevNeg, 0],
         vae: ["1", 2],
-        latent: [prevLat, 0],
+        latent: [prevLatNode, prevLatIdx],
         image: [String(scaleId), 0],
         frame_idx: FRAME_IDX[i],
         strength: 0.7,
@@ -1688,9 +1691,11 @@ function buildLtx2_3ICUnionControl6Ref(prompt: string, width: number, height: nu
         attention_strength: 0.7,
       },
     };
+    // 下一节点从本节点输出 [positive(0), negative(1), latent(2)]
     prevPos = String(nodeId);
     prevNeg = String(nodeId);
-    prevLat = String(nodeId);
+    prevLatNode = String(nodeId);
+    prevLatIdx = 2;
   }
   // scheduler + sampler (跟 ic-union-control 单图同款 20 步)
   wf["7"] = { class_type: "LTXVScheduler", inputs: { steps: 20, max_shift: 2.05, base_shift: 0.95, stretch: true, terminal: 0.1 } };
@@ -1704,7 +1709,7 @@ function buildLtx2_3ICUnionControl6Ref(prompt: string, width: number, height: nu
       negative: [prevNeg, 0],
       sampler: ["8", 0],
       sigmas: ["7", 0],
-      latent_image: [prevLat, 2],
+      latent_image: [prevLatNode, prevLatIdx],
       add_noise: true,
       noise_seed: seed,
       cfg: 3.0,
