@@ -1754,17 +1754,26 @@ function buildLtx2_3ICUnionControl6Ref(prompt: string, width: number, height: nu
 //   7-9:   Scheduler/Sampler/SamplerCustom
 //   80-81: VAEDecode + VHS_VideoCombine
 function buildLtx2_34Grid1Shot(prompt: string, width: number, height: number, length: number, seed: number, refImage: string): any {
-  // v14.1.1 (2026-08-17): 末帧锁 BR 但避开 LTX VAE 8x temporal 越界
-  //   关键: latent_length = (length - 1) // 8 + 1 (LTX VAE 8x temporal)
-  //   末帧 latent 索引 = latent_length - 1 → 对应视频帧 (latent_length - 1) * 8
-  //   但更直接: frame_idx_4 = length - 8, 既接近末帧又留 8 帧 buffer
-  // strength 全 1.0 (跟 v7 经验 14 truly-startend-strong 一致, 锁死每段避免 0.7 strength 黑屏)
+  // v14.2 (2026-08-17 主人选 B 方案): strength_4 单独 1.0 压制末帧拼图缝
+  //   关键发现: 4 段 prompt 拼接 + 0.7 strength 已让 0-9.3s 完全无拼图缝 (v14.1.2 实测)
+  //            9.6-10.0s (0.4s) 出现拼图缝: frame_idx_4=232 太靠末帧, 末段被 4 张图"飞回"拼图状态
+  //   v14.1.2 错以为"自由空间"能修, 但 free space = 末段无引导 = 违背 v9 锁首末 1.0 原则
+  //   v14.2 正解: 末帧引导加强 (strength_4=1.0), 其他 3 段保持 0.7 (留创造空间避免出黑屏)
+  //     - 段 1 0.7 (0-2.5s 紧闭嘴, 引导不锁死)
+  //     - 段 2 0.7 (2.5-5s 裂缝, 模型自由发挥)
+  //     - 段 3 0.7 (5-7.5s 半开, 模型自由发挥)
+  //     - 段 4 1.0 (7.5-10s 完全盛开+金黄花蕊, 强制锁死末帧)
+  //   frame_idx_4 = 232 (length-8) 保持不变 (LTX VAE 8x temporal 合法 + 末帧引导)
   const FRAME_IDX = [
     0,
     Math.max(1, Math.floor(length / 3)),
     Math.max(2, Math.floor((length * 2) / 3)),
     Math.max(3, length - 8),
   ];
+  const STRENGTH_1 = 0.7;
+  const STRENGTH_2 = 0.7;
+  const STRENGTH_3 = 0.7;
+  const STRENGTH_4 = 1.0;  // 末帧加强压制拼图缝
   return {
     "1": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors" } },
     "2": { class_type: "LTXAVTextEncoderLoader", inputs: { text_encoder: "gemma_3_12B_it_fpmixed.safetensors", ckpt_name: "ltx-2.3-22b-dev-fp8.safetensors", device: "default" } },
@@ -1797,16 +1806,16 @@ function buildLtx2_34Grid1Shot(prompt: string, width: number, height: number, le
         num_guides: "4",
         "num_guides.image_1": ["30", 0],
         "num_guides.frame_idx_1": FRAME_IDX[0],
-        "num_guides.strength_1": 1.0,
+        "num_guides.strength_1": STRENGTH_1,
         "num_guides.image_2": ["31", 0],
         "num_guides.frame_idx_2": FRAME_IDX[1],
-        "num_guides.strength_2": 1.0,
+        "num_guides.strength_2": STRENGTH_2,
         "num_guides.image_3": ["32", 0],
         "num_guides.frame_idx_3": FRAME_IDX[2],
-        "num_guides.strength_3": 1.0,
+        "num_guides.strength_3": STRENGTH_3,
         "num_guides.image_4": ["33", 0],
         "num_guides.frame_idx_4": FRAME_IDX[3],
-        "num_guides.strength_4": 1.0,
+        "num_guides.strength_4": STRENGTH_4,
       },
     },
     // 老版 pipeline (与 v9-v13 一致, 跑过 100+ 次稳定)
