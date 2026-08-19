@@ -715,22 +715,52 @@ function findOutputFile(entry: HistoryEntry, prefer: "video" | "image" | "audio"
 }
 
 async function submitAndPoll(promptId: string, prefer: "video" | "image" | "audio", pollIntervalMs: number, pollTimeoutMs: number): Promise<{ filename: string; subfolder: string; type: string }> {
+  // 2026-08-18 方式2: 排队不计超时 (批量提交 → comfyui 串行排队时不再误报 timeout)
+  // 问题复现: task 5 提交 21:32:54, 21:42:54 超时, 而 comfyui 21:42:55 才开始跑它 (差 1 秒)
+  // 语义: 任务在 queue_pending(排队中) 不消耗 pollTimeoutMs 预算; /history 出现该 promptId
+  //       (= 已开始执行) 才真正开始计时; 外层总兜底 pollTimeoutMs + 60min 防真死(连不上/卡死).
+  const queueWaitCapMs = pollTimeoutMs + 60 * 60_000;
+  let execStart: number | null = null;
   const result = await pollTask(async () => {
-    // 2026-08-13: history 拉大到 100, timeout 60s
-    // 原因: ComfyUI 跑图时 /history 常超 10s, 之前直接 axios 超时 → pollTask catch 后 return 不重试
-    // → 概率性 "timeout of 10000ms exceeded" 失败. 现在让 /history 拿到足够数据 + 重试容忍网络毛刺.
+    // 1) 查 /queue, 判断排队状态 (查询失败不致命, 按已执行处理继续轮询)
+    let inPending = false;
+    let inRunning = false;
+    try {
+      const queue = await comfyGet("/queue", 30_000);
+      const pending = (queue && queue.queue_pending) || [];
+      const running = (queue && queue.queue_running) || [];
+      inPending = pending.some((it: any[]) => Array.isArray(it) && it[1] === promptId);
+      inRunning = running.some((it: any[]) => Array.isArray(it) && it[1] === promptId);
+    } catch (e) {
+      // ignore, 继续轮询
+    }
+    // 2) 查 /history (拉大到 100, timeout 60s: 跑图时 /history 常超 10s, 容忍网络毛刺)
     const history = await comfyGet("/history?max_items=100", 60_000);
     const entry = history && history[promptId] ? history[promptId] : null;
-    if (!entry) return { completed: false };
-    if (entry.status.status_str === "error") {
-      const errMsg = entry.status.messages?.find((m: any[]) => Array.isArray(m) && m[0] === "execution_error")?.[1]?.exception_message || "unknown error";
-      return { completed: true, error: `ComfyUI 执行失败: ${errMsg}` };
+    if (entry) {
+      if (entry.status.status_str === "error") {
+        const errMsg = entry.status.messages?.find((m: any[]) => Array.isArray(m) && m[0] === "execution_error")?.[1]?.exception_message || "unknown error";
+        return { completed: true, error: `ComfyUI 执行失败: ${errMsg}` };
+      }
+      // history 已出现该 promptId = 已开始执行 → 开始计时
+      if (execStart === null) execStart = Date.now();
+      if (!entry.status.completed) {
+        if (Date.now() - execStart > pollTimeoutMs) return { completed: false, error: "timeout" };
+        return { completed: false };
+      }
+      const out = findOutputFile(entry, prefer);
+      if (!out) return { completed: false, error: "ComfyUI 完成但未找到输出文件" };
+      return { completed: true, data: JSON.stringify(out) };
     }
-    if (!entry.status.completed) return { completed: false };
-    const out = findOutputFile(entry, prefer);
-    if (!out) return { completed: false, error: "ComfyUI 完成但未找到输出文件" };
-    return { completed: true, data: JSON.stringify(out) };
-  }, pollIntervalMs, pollTimeoutMs);
+    // 3) history 无记录: 排队中(或刚提交尚未入队) → 不计时, 重置执行起点
+    if (inPending || inRunning) {
+      execStart = null;
+      return { completed: false };
+    }
+    // 4) 窗口期(提交后尚未出现在 queue/history): 同样不计时
+    execStart = null;
+    return { completed: false };
+  }, pollIntervalMs, queueWaitCapMs);
   if (result.error) throw new Error(result.error);
   if (!result.completed || !result.data) throw new Error("ComfyUI 轮询超时");
   return JSON.parse(result.data);
