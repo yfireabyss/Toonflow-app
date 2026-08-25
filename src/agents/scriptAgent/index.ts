@@ -1,0 +1,389 @@
+import { Socket } from "socket.io";
+import { tool, jsonSchema } from "ai";
+import { z } from "zod";
+import u from "@/utils";
+import Memory from "@/utils/agent/memory";
+import useTools from "@/agents/scriptAgent/tools";
+import ResTool from "@/socket/resTool";
+import * as fs from "fs";
+import path from "path";
+
+export interface AgentContext {
+  socket: Socket;
+  isolationKey: string;
+  text: string;
+  userMessageTime?: number;
+  abortSignal?: AbortSignal;
+  resTool: ResTool;
+  msg: ReturnType<ResTool["newMessage"]>;
+  thinkConfig: {
+    think: boolean;
+    thinlLevel: 0 | 1 | 2 | 3;
+  };
+}
+
+function buildMemPrompt(mem: Awaited<ReturnType<Memory["get"]>>): string {
+  let memoryContext = "";
+  if (mem.rag.length) {
+    memoryContext += `[相关记忆]\n${mem.rag.map((r) => r.content).join("\n")}`;
+  }
+  if (mem.summaries.length) {
+    if (memoryContext) memoryContext += "\n\n";
+    memoryContext += `[历史摘要]\n${mem.summaries.map((s, i) => `${i + 1}. ${s.content}`).join("\n")}`;
+  }
+  if (mem.shortTerm.length) {
+    if (memoryContext) memoryContext += "\n\n";
+    memoryContext += `[近期对话]\n${mem.shortTerm.map((m) => `${m.role}: ${m.content}`).join("\n")}`;
+  }
+  return `## Memory\n以下是你对用户的记忆，可作为参考但不要主动提及：\n${memoryContext}`;
+}
+
+export async function runDecisionAI(ctx: AgentContext) {
+  const { isolationKey, text, userMessageTime, abortSignal, resTool } = ctx;
+  const memory = new Memory("scriptAgent", isolationKey);
+  await memory.add("user", text, { createTime: userMessageTime });
+
+  const skill = path.join(u.getPath("skills"), "script_agent_decision.md");
+  const prompt = await fs.promises.readFile(skill, "utf-8");
+
+  const mem = buildMemPrompt(await memory.get(text));
+
+  const projectData = await u.db("o_project").where("id", resTool.data.projectId).first();
+
+  const novelData = await u.db("o_novel").where("projectId", resTool.data.projectId).select("chapterIndex");
+
+  const projectInfo = [
+    "## 项目信息",
+    `小说名称：${projectData?.name ?? "未知"}`,
+    `小说类型：${projectData?.type ?? "未知"}`,
+    `小说简介：${projectData?.intro ?? "无"}`,
+    `目标改编影视视觉手册|画风：${projectData?.artStyle ?? "无"}`,
+    `目标改编视频画幅：${projectData?.videoRatio ?? "16:9"}`,
+    `章节数量：${novelData.length}章`,
+  ].join("\n");
+
+  const { fullStream } = await u.Ai.Text("scriptAgent:decisionAgent", ctx.thinkConfig.think, ctx.thinkConfig.thinlLevel).stream({
+    messages: [
+      { role: "system", content: prompt },
+      { role: "assistant", content: projectInfo + "\n" + mem },
+      { role: "user", content: text },
+    ],
+    abortSignal,
+    tools: {
+      ...memory.getTools(),
+      ...useTools({ resTool: ctx.resTool, msg: ctx.msg }),
+      ...createSubAgent(ctx),
+    },
+    onFinish: async (completion) => {
+      await memory.add("assistant:decision", removeAllXmlTags(completion.text));
+    },
+  });
+
+  let currentMsg = ctx.msg;
+  await consumeFullStream(fullStream, currentMsg, () => {
+    if (ctx.msg === currentMsg) return currentMsg;
+    currentMsg.complete();
+    currentMsg = ctx.msg;
+    return currentMsg;
+  });
+}
+
+function createSubAgent(parentCtx: AgentContext) {
+  const { resTool, abortSignal } = parentCtx;
+  const memory = new Memory("scriptAgent", parentCtx.isolationKey);
+
+  async function runAgent({
+    key,
+    prompt,
+    system,
+    name,
+    memoryKey,
+    tools: extraTools,
+    messages,
+  }: {
+    key: `${string}:${string}`;
+    prompt: string;
+    system: string;
+    name: string;
+    memoryKey: string;
+    tools?: Record<string, any>;
+    messages?: { role: "user" | "assistant" | "system"; content: string }[];
+  }) {
+    parentCtx.msg.complete();
+    const subMsg = resTool.newMessage("assistant", name);
+
+    const { fullStream } = await u.Ai.Text(key, parentCtx.thinkConfig.think, parentCtx.thinkConfig.thinlLevel).stream({
+      system,
+      messages: messages ?? [{ role: "user", content: prompt }],
+      abortSignal,
+      tools: { ...extraTools, ...useTools({ resTool, msg: subMsg }) },
+    });
+
+    const fullResponse = await consumeFullStream(fullStream, subMsg);
+
+    // ★ 关键修复: 自动 parse LLM 输出的 XML 标签并落库
+    // 之前: sub-agent 输出 <storySkeleton>...</storySkeleton> 等 XML 后,
+    //       没有任何代码把这些数据写到 o_agentWorkData, 导致监督层 get_planData() 永远拿到空.
+    // 现在: runAgent 收完 LLM stream 后立刻正则匹配, 写到对应 DB 表/字段.
+    if (fullResponse.trim()) {
+      await autoPersistSubAgentOutput(resTool.data.projectId, fullResponse);
+    }
+
+    if (fullResponse.trim()) {
+      await memory.add(memoryKey, removeAllXmlTags(fullResponse), {
+        name,
+        createTime: new Date(subMsg.datetime).getTime(),
+      });
+    }
+
+    parentCtx.msg = resTool.newMessage("assistant", "视频策划");
+    return fullResponse;
+  }
+
+  const promptInput = z
+    .object({
+      prompt: z.string().describe("交给子Agent的任务简约描述，100字以内"),
+    })
+    .toJSONSchema();
+
+  const run_sub_agent_storySkeleton = tool({
+    description: "运行执行subAgent来完成故事骨架相关任务",
+    inputSchema: jsonSchema<{ prompt: string }>(promptInput),
+    execute: async ({ prompt }) => {
+      const skill = path.join(u.getPath("skills"), "script_execution_skeleton.md");
+      const systemPrompt = await fs.promises.readFile(skill, "utf-8");
+
+      const formatPrompt = `
+## 交付要求
+1. 你必须以如下 XML 格式输出故事骨架（这是工作区的最终交付格式）：
+<storySkeleton>故事骨架内容</storySkeleton>
+
+2. 你不需要也**不要**尝试调用任何写入工具——上层流水线会从你的输出里 parse XML 标签并自动写入工作区。你的工作只是按格式输出 XML。
+
+3. **完成判据**：只要你的输出里包含完整且闭合的 <storySkeleton>...</storySkeleton> 标签，就算『写入完成』。不要在 chat 里说『未完成』、『无法写入』、『缺少工具』等消极话术——这些都不是事实，会被上层误判为任务失败。
+`.trim();
+
+      return runAgent({
+        key: "scriptAgent:storySkeletonAgent",
+        prompt,
+        system: systemPrompt + formatPrompt,
+        name: "编剧",
+        memoryKey: "assistant:execution:storySkeleton",
+        messages: [{ role: "user", content: prompt + formatPrompt }],
+      });
+    },
+  });
+
+  const run_sub_agent_adaptationStrategy = tool({
+    description: "运行执行subAgent来完成改编策略相关任务",
+    inputSchema: jsonSchema<{ prompt: string }>(promptInput),
+    execute: async ({ prompt }) => {
+      const skill = path.join(u.getPath("skills"), "script_execution_adaptation.md");
+      const systemPrompt = await fs.promises.readFile(skill, "utf-8");
+
+      const formatPrompt = `
+## 交付要求
+1. 你必须以如下 XML 格式输出改编策略（这是工作区的最终交付格式）：
+<adaptationStrategy>改编策略内容</adaptationStrategy>
+
+2. 你不需要也**不要**尝试调用任何写入工具——上层流水线会从你的输出里 parse XML 标签并自动写入工作区。你的工作只是按格式输出 XML。
+
+3. **完成判据**：只要你的输出里包含完整且闭合的 <adaptationStrategy>...</adaptationStrategy> 标签，就算『写入完成』。不要在 chat 里说『未完成』、『无法写入』、『缺少工具』等消极话术——这些都不是事实，会被上层误判为任务失败。
+`.trim();
+
+      return runAgent({
+        key: "scriptAgent:adaptationStrategyAgent",
+        prompt,
+        system: systemPrompt + formatPrompt,
+        name: "编剧",
+        memoryKey: "assistant:execution:adaptationStrategy",
+        messages: [{ role: "user", content: prompt + formatPrompt }],
+      });
+    },
+  });
+
+  const run_sub_agent_script = tool({
+    description: "运行执行subAgent来完成剧本相关任务",
+    inputSchema: jsonSchema<{ prompt: string }>(promptInput),
+    execute: async ({ prompt }) => {
+      const skill = path.join(u.getPath("skills"), "script_execution_script.md");
+      const systemPrompt = await fs.promises.readFile(skill, "utf-8");
+
+      const scriptList = await u.db("o_script").where("projectId", resTool.data.projectId).select("id", "name");
+      const scriptPrompt = ["## 可用剧本(ID:名称)", scriptList.map((s: any) => `${s.id}:${(s.name || "").replace(/[,:]/g, "")}`).join(","), ""].join(
+        "\n",
+      );
+
+      const novelData = await u.db("o_novel").where("projectId", resTool.data.projectId).select("chapterIndex");
+
+      const formatPrompt = `
+## 交付要求
+1. 你必须以如下 XML 格式输出剧本（这是工作区的最终交付格式，**XML 不得添加任何额外标签**）：
+<scriptItem name="剧本名称">剧本内容</scriptItem>
+<scriptItem name="剧本名称">剧本内容</scriptItem>
+<scriptItem name="剧本名称">剧本内容</scriptItem>
+
+2. 你不需要也**不要**尝试调用任何写入工具——上层流水线会从你的输出里 parse XML 标签并自动写入工作区。你的工作只是按格式输出 XML。
+
+3. **完成判据**：只要你的输出里包含完整且闭合的 <scriptItem name="...">...</scriptItem> 标签，就算『写入完成』。不要在 chat 里说『未完成』、『无法写入』、『缺少工具』等消极话术——这些都不是事实，会被上层误判为任务失败。
+`.trim();
+
+      return runAgent({
+        key: "scriptAgent:scriptAgent",
+        prompt,
+        system: systemPrompt + formatPrompt,
+        messages: [
+          { role: "assistant", content: scriptPrompt + `章节数量：${novelData.length}章` },
+          { role: "user", content: prompt + formatPrompt },
+        ],
+        name: "编剧",
+        memoryKey: "assistant:execution:script",
+      });
+    },
+  });
+
+  const run_supervision_agent = tool({
+    description: "运行监督层subAgent执行独立任务，完成后返回结果",
+    inputSchema: jsonSchema<{ prompt: string }>(promptInput),
+    execute: async ({ prompt }) => {
+      const skill = path.join(u.getPath("skills"), "script_agent_supervision.md");
+      const systemPrompt = await fs.promises.readFile(skill, "utf-8");
+
+      return runAgent({
+        key: "scriptAgent:supervisionAgent",
+        prompt,
+        system: systemPrompt,
+        name: "编辑",
+        memoryKey: "assistant:supervision",
+      });
+    },
+  });
+
+  return {
+    run_sub_agent_storySkeleton,
+    run_sub_agent_adaptationStrategy,
+    run_sub_agent_script,
+    run_supervision_agent,
+  };
+}
+
+async function consumeFullStream(
+  fullStream: AsyncIterable<any>,
+  initialMsg: ReturnType<ResTool["newMessage"]>,
+  syncMsg?: () => ReturnType<ResTool["newMessage"]>,
+): Promise<string> {
+  let msg = initialMsg;
+  let text = msg.text();
+  let thinking: ReturnType<typeof msg.thinking> | null = null;
+  let thinkTime = 0;
+  let fullResponse = "";
+
+  try {
+    for await (const chunk of fullStream) {
+      if (syncMsg) {
+        const newMsg = syncMsg();
+        if (newMsg !== msg) {
+          msg = newMsg;
+          text = msg.text();
+        }
+      }
+      if (chunk.type === "reasoning-start") {
+        thinkTime = Date.now();
+        thinking = msg.thinking("思考中...");
+      } else if (chunk.type === "reasoning-delta") {
+        thinking?.append(chunk.text);
+      } else if (chunk.type === "reasoning-end") {
+        thinkTime = Date.now() - thinkTime;
+        thinking?.updateTitle(`思考完毕（${(thinkTime / 1000).toFixed(1)} 秒）`);
+        thinking?.complete();
+        thinking = null;
+      } else if (chunk.type === "text-delta") {
+        text.append(chunk.text);
+        fullResponse += chunk.text;
+      } else if (chunk.type === "error") {
+        throw chunk.error;
+      }
+    }
+    text.complete();
+    msg.complete();
+  } catch (err: any) {
+    thinking?.complete();
+    const errMsg = err?.message ?? String(err);
+    text.append(errMsg);
+    text.error();
+    msg.error();
+    throw err;
+  }
+
+  return fullResponse;
+}
+
+function removeAllXmlTags(text: string): string {
+  text = text.replace(/<([a-zA-Z][\w-]*)(\s+[^>]*)?>([\s\S]*?)<\/\1>/g, "");
+  text = text.replace(/<([a-zA-Z][\w-]*)(\s+[^>]*)?\/>/g, "");
+  text = text.replace(/<\/?[a-zA-Z][\w-]*(\s+[^>]*)?>/g, "");
+  return text.trim();
+}
+
+/**
+ * ★ 关键修复 (2026-08-13 主人反馈):
+ * 之前 sub-agent 输出的 <storySkeleton> <adaptationStrategy> <scriptItem> XML 飘在 LLM 文本流里,
+ * 没有任何代码把数据真的写到 o_agentWorkData / o_script, 监督层 get_planData() 永远拿到空.
+ * 现在 runAgent 收完 stream 后自动正则匹配 + 直接写库, 不再依赖 client reverse emit.
+ */
+async function autoPersistSubAgentOutput(projectId: number, text: string): Promise<void> {
+  const saved: string[] = [];
+  try {
+    // 1. <storySkeleton>...</storySkeleton> -> o_agentWorkData.scriptAgent.storySkeleton
+    const skMatch = text.match(/<storySkeleton>([\s\S]*?)<\/storySkeleton>/);
+    if (skMatch) {
+      await upsertAgentWorkData(projectId, "scriptAgent", "storySkeleton", skMatch[1].trim());
+      saved.push(`storySkeleton(${skMatch[1].trim().length})`);
+    }
+
+    // 2. <adaptationStrategy>...</adaptationStrategy> -> o_agentWorkData.scriptAgent.adaptationStrategy
+    const asMatch = text.match(/<adaptationStrategy>([\s\S]*?)<\/adaptationStrategy>/);
+    if (asMatch) {
+      await upsertAgentWorkData(projectId, "scriptAgent", "adaptationStrategy", asMatch[1].trim());
+      saved.push(`adaptationStrategy(${asMatch[1].trim().length})`);
+    }
+
+    // 3. <scriptItem name="...">...</scriptItem> -> o_script
+    const siRegex = /<scriptItem\s+name="([^"]+)">([\s\S]*?)<\/scriptItem>/g;
+    let siMatch: RegExpExecArray | null;
+    let siCount = 0;
+    while ((siMatch = siRegex.exec(text)) !== null) {
+      const name = siMatch[1];
+      const content = siMatch[2];
+      const existing = await u.db("o_script").where({ projectId, name }).first();
+      if (existing) {
+        await u.db("o_script").where({ id: existing.id }).update({ content });
+      } else {
+        await u.db("o_script").insert({ projectId, name, content });
+      }
+      siCount++;
+    }
+    if (siCount) saved.push(`scriptItem×${siCount}`);
+
+    if (saved.length) {
+      console.info(`[scriptAgent autoPersist] project=${projectId} saved: ${saved.join(", ")}`);
+    }
+  } catch (e) {
+    console.error("[scriptAgent autoPersist] error:", e);
+  }
+}
+
+/** 合并写入 o_agentWorkData (按 projectId+key 找到行, 解析 data JSON, 覆盖指定字段) */
+async function upsertAgentWorkData(projectId: number, key: string, field: string, value: any): Promise<void> {
+  const row: any = await u.db("o_agentWorkData").where({ projectId, key }).first();
+  let data: any = {};
+  if (row && row.data) {
+    try { data = JSON.parse(row.data); } catch {}
+  }
+  data[field] = value;
+  if (row) {
+    await u.db("o_agentWorkData").where({ id: row.id }).update({ data: JSON.stringify(data) });
+  } else {
+    await u.db("o_agentWorkData").insert({ projectId, key, data: JSON.stringify(data) });
+  }
+}

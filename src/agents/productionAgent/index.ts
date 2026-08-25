@@ -1,0 +1,675 @@
+import { Socket } from "socket.io";
+import { z } from "zod";
+import { tool, jsonSchema } from "ai";
+import u from "@/utils";
+import Memory from "@/utils/agent/memory";
+import { createSkillTools, parseFrontmatter, scanSkills, useSkill } from "@/utils/agent/skillsTools";
+import useTools from "@/agents/productionAgent/tools";
+import ResTool from "@/socket/resTool";
+import * as fs from "fs";
+import path from "path";
+
+export interface AgentContext {
+  socket: Socket;
+  isolationKey: string;
+  text: string;
+  userMessageTime?: number;
+  abortSignal?: AbortSignal;
+  resTool: ResTool;
+  msg: ReturnType<ResTool["newMessage"]>;
+  messages?: { role: "user" | "assistant" | "system"; content: string }[];
+  thinkConfig: {
+    think: boolean;
+    thinlLevel: 0 | 1 | 2 | 3;
+  };
+}
+
+function buildMemPrompt(mem: Awaited<ReturnType<Memory["get"]>>): string {
+  let memoryContext = "";
+  if (mem.rag.length) {
+    memoryContext += `[相关记忆]\n${mem.rag.map((r) => r.content).join("\n")}`;
+  }
+  if (mem.summaries.length) {
+    if (memoryContext) memoryContext += "\n\n";
+    memoryContext += `[历史摘要]\n${mem.summaries.map((s, i) => `${i + 1}. ${s.content}`).join("\n")}`;
+  }
+  if (mem.shortTerm.length) {
+    if (memoryContext) memoryContext += "\n\n";
+    memoryContext += `[近期对话]\n${mem.shortTerm.map((m) => `${m.role}: ${m.content}`).join("\n")}`;
+  }
+  return `## Memory\n以下是你对用户的记忆，可作为参考但不要主动提及：\n${memoryContext}`;
+}
+
+export async function runDecisionAI(ctx: AgentContext) {
+  const { isolationKey, text, abortSignal } = ctx;
+  const memory = new Memory("productionAgent", isolationKey);
+  await memory.add("user", text);
+
+  const skill = path.join(u.getPath("skills"), "production_agent_decision.md");
+  const prompt = await fs.promises.readFile(skill, "utf-8");
+
+  const projectInfo = await u.db("o_project").where("id", ctx.resTool.data.projectId).first();
+  if (!projectInfo) throw new Error(`项目不存在，ID: ${ctx.resTool.data.projectId}`);
+  const [_, imageModelName] = projectInfo.imageModel!.split(/:(.+)/);
+  const [id, videoModelName] = projectInfo.videoModel!.split(/:(.+)/);
+  const models = await u.vendor.getModelList(id);
+  if (!models.length) throw new Error(`项目使用的模型不存在，ID: ${projectInfo.videoModel}`);
+  let videoMode = "";
+  try {
+    videoMode = JSON.parse(projectInfo.mode ?? "");
+  } catch (e) {
+    videoMode = projectInfo.mode ?? "";
+  }
+  const isRef = Array.isArray(videoMode) ? true : false;
+  // const findData = models.find((i: any) => i.modelName == videoModelName);
+  // const isRef = findData.mode.every((i: any) => Array.isArray(i));
+
+  const modelInfo = `项目使用的模型如下：\n图像模型：${imageModelName}\n视频模型：${videoModelName}\n多参：${isRef ? "是" : "否"}`;
+
+  const mem = buildMemPrompt(await memory.get(text));
+
+  const { fullStream } = await u.Ai.Text("productionAgent:decisionAgent", ctx.thinkConfig.think, ctx.thinkConfig.thinlLevel).stream({
+    messages: [
+      { role: "system", content: prompt },
+      { role: "assistant", content: mem + "\n" + modelInfo },
+      { role: "user", content: text },
+    ],
+    abortSignal,
+    tools: {
+      ...memory.getTools(),
+      ...useTools({ resTool: ctx.resTool, msg: ctx.msg }),
+      ...(await createSubAgent(ctx)),
+    },
+    onFinish: async (completion) => {
+      await memory.add("assistant:decision", removeAllXmlTags(completion.text));
+    },
+  });
+
+  let currentMsg = ctx.msg;
+  await consumeFullStream(fullStream, currentMsg, () => {
+    if (ctx.msg === currentMsg) return currentMsg;
+    currentMsg.complete();
+    currentMsg = ctx.msg;
+    return currentMsg;
+  });
+}
+
+async function createSubAgent(parentCtx: AgentContext) {
+  const { resTool, abortSignal } = parentCtx;
+  const memory = new Memory("productionAgent", parentCtx.isolationKey);
+  async function runAgent({
+    key,
+    prompt,
+    system,
+    name,
+    memoryKey,
+    tools: extraTools,
+    messages,
+  }: {
+    key: `${string}:${string}`;
+    prompt: string;
+    system: string;
+    name: string;
+    memoryKey: string;
+    tools?: Record<string, any>;
+    messages?: { role: "user" | "assistant" | "system"; content: string }[];
+  }) {
+    parentCtx.msg.complete();
+    const subMsg = resTool.newMessage("assistant", name);
+
+    const { fullStream } = await u.Ai.Text(key, parentCtx.thinkConfig.think, parentCtx.thinkConfig.thinlLevel).stream({
+      system,
+      messages: messages ?? [{ role: "user", content: prompt }],
+      abortSignal,
+      tools: { ...extraTools, ...useTools({ resTool, msg: subMsg }) },
+    });
+
+    const fullResponse = await consumeFullStream(fullStream, subMsg);
+
+    // ★ 关键修复: 自动 parse LLM 输出的 XML 标签并落库
+    // 之前 <scriptPlan> <storyboardTable> <storyboardItem> 等 XML 飘在文本流里,
+    // 没有任何代码写到 o_agentWorkData 或 o_storyboard, 监督层 get_flowData() 永远拿空.
+    // 现在自动落库, 不再依赖 client reverse emit.
+    if (fullResponse.trim()) {
+      await autoPersistSubAgentOutput(
+        resTool.data.projectId,
+        resTool.data.scriptId,
+        fullResponse,
+      );
+    }
+
+    if (fullResponse.trim()) {
+      await memory.add(memoryKey, removeAllXmlTags(fullResponse), {
+        name,
+        createTime: new Date(subMsg.datetime).getTime(),
+      });
+    }
+
+    parentCtx.msg = resTool.newMessage("assistant", "视频策划");
+    return fullResponse;
+  }
+
+  const promptInput = z
+    .object({
+      prompt: z.string().describe("交给子Agent的任务简约描述，100字以内"),
+    })
+    .toJSONSchema();
+
+  const projectInfo = await u.db("o_project").where("id", resTool.data.projectId).first();
+  if (!projectInfo) throw new Error(`项目不存在，ID: ${resTool.data.projectId}`);
+  const artSkills = await createArtSkills(projectInfo?.artStyle!, projectInfo?.directorManual!);
+
+  const [_, imageModelName] = projectInfo.imageModel!.split(/:(.+)/);
+  const [id, videoModelName] = projectInfo.videoModel!.split(/:(.+)/);
+  const models = await u.vendor.getModelList(id);
+  if (!models.length) throw new Error(`项目使用的模型不存在，ID: ${projectInfo.videoModel}`);
+  // const findData = models.find((i: any) => i.modelName == videoModelName);
+  //
+  let videoMode = "";
+  try {
+    videoMode = JSON.parse(projectInfo.mode ?? "");
+  } catch (e) {
+    videoMode = projectInfo.mode ?? "";
+  }
+  const isRef = Array.isArray(videoMode) ? true : false;
+
+  const modelInfo = `项目使用的模型如下：\n图像模型：${imageModelName}\n视频模型：${videoModelName}\n多参：${isRef ? "是" : "否"}`;
+
+  // const run_sub_agent_execution = tool({
+  //   description: "执行层子Agent，负责衍生资产、",
+  //   inputSchema: promptInput,
+  //   execute: async ({ prompt }) => {
+  //     const skill = path.join(u.getPath("skills"), "production_agent_execution.md");
+  //     const systemPrompt = await fs.promises.readFile(skill, "utf-8");
+  //     const addPrompt =
+  //       "\n" +
+  //       [
+  //         "你必须使用如下XML格式写入工作区：\n```",
+  //         "拍摄计划：<scriptPlan>内容</scriptPlan>",
+  //         "分镜表：<storyboardTable>内容</storyboardTable>",
+  //         "分镜面板：<storyboardItem videoDesc='视频描述' prompt=提示词内容 track='分组' duration='视频推荐时间' associateAssetsIds='[该分镜所需的资产ID列表]'></storyboardItem>",
+  //         "```",
+  //       ].join("\n");
+
+  //     return runAgent({
+  //       prompt,
+  //       system: systemPrompt + addPrompt,
+  //       name: "执行导演",
+  //       memoryKey: "assistant:execution",
+  //       messages: [
+  //         { role: "assistant", content: artSkills.prompt + `\n${modelInfo}` },
+  //         { role: "user", content: prompt + addPrompt },
+  //       ],
+  //       tools: { ...artSkills.tools },
+  //     });
+  //   },
+  // });
+
+  //衍生资产分析与信息写入
+  const run_sub_agent_derive_assets = tool({
+    description: "运行执行subAgent来完成衍生资产分析与信息写入相关任务",
+    inputSchema: jsonSchema<{ prompt: string }>(promptInput),
+    execute: async ({ prompt }) => {
+      const skill = path.join(u.getPath("skills"), "production_execution_derive_assets.md");
+      const systemPrompt = await fs.promises.readFile(skill, "utf-8");
+      return runAgent({
+        key: "productionAgent:deriveAssetsAgent",
+        prompt,
+        system: systemPrompt,
+        name: "执行导演",
+        memoryKey: "assistant:execution",
+        messages: [
+          { role: "assistant", content: artSkills.prompt + `\n${modelInfo}` },
+          { role: "user", content: prompt },
+        ],
+        tools: { activate_skill: artSkills.tools.activate_skill },
+      });
+    },
+  });
+
+  //衍生资产图片生成
+  const run_sub_agent_generate_assets = tool({
+    description: "运行执行subAgent来完成衍生资产图片生成相关任务",
+    inputSchema: jsonSchema<{ prompt: string }>(promptInput),
+    execute: async ({ prompt }) => {
+      const skill = path.join(u.getPath("skills"), "production_execution_generate_assets.md");
+      const systemPrompt = await fs.promises.readFile(skill, "utf-8");
+      return runAgent({
+        key: "productionAgent:generateAssetsAgent",
+        prompt,
+        system: systemPrompt,
+        name: "执行导演",
+        memoryKey: "assistant:execution",
+        messages: [
+          { role: "assistant", content: artSkills.prompt + `\n${modelInfo}` },
+          { role: "user", content: prompt },
+        ],
+        tools: { activate_skill: artSkills.tools.activate_skill },
+      });
+    },
+  });
+
+  //拍摄计划
+  const run_sub_agent_director_plan = tool({
+    description: "运行执行subAgent来完成导演规划相关任务",
+    inputSchema: jsonSchema<{ prompt: string }>(promptInput),
+    execute: async ({ prompt }) => {
+      const skill = path.join(u.getPath("skills"), "production_execution_director_plan.md");
+      const systemPrompt = await fs.promises.readFile(skill, "utf-8");
+
+      const addPrompt =
+        "\n【关键】把完整拍摄计划写入工作区：将拍摄计划 Markdown（分场汇总表 + 逐场注意事项）包裹在 <scriptPlan> 标签内。\n" +
+        "标签内必须是完整内容本身，禁止写'内容'二字占位。示例格式：\n" +
+        "```\n<scriptPlan>\n### 分场汇总表\n| 场次 | 场景名 | 台词条数 | ... |\n...完整表格...\n</scriptPlan>\n```";
+
+      return runAgent({
+        key: "productionAgent:directorPlanAgent",
+        prompt,
+        system: systemPrompt + addPrompt,
+        name: "执行导演",
+        memoryKey: "assistant:execution",
+        messages: [
+          { role: "assistant", content: artSkills.prompt + `\n${modelInfo}` },
+          { role: "user", content: prompt + addPrompt },
+        ],
+        tools: { activate_skill: artSkills.tools.activate_skill },
+      });
+    },
+  });
+
+  //分镜图生成
+  const run_sub_agent_storyboard_gen = tool({
+    description: "运行执行subAgent来完成分镜图生成相关任务",
+    inputSchema: jsonSchema<{ prompt: string }>(promptInput),
+    execute: async ({ prompt }) => {
+      const skill = path.join(u.getPath("skills"), "production_execution_storyboard_gen.md");
+      const systemPrompt = await fs.promises.readFile(skill, "utf-8");
+      return runAgent({
+        key: "productionAgent:storyboardGenAgent",
+        prompt,
+        system: systemPrompt,
+        name: "执行导演",
+        memoryKey: "assistant:execution",
+        messages: [
+          { role: "assistant", content: artSkills.prompt + `\n${modelInfo}` },
+          { role: "user", content: prompt },
+        ],
+        tools: { activate_skill: artSkills.tools.activate_skill },
+      });
+    },
+  });
+
+  // const mainSkills: { path: string; name: string; description: string }[] = [];
+  // for (const skill of mainSkill) {
+  //   const skillPath = path.join(rootDir, skill + ".md");
+  //   if (!fs.existsSync(skillPath)) throw new Error(`主技能文件不存在: ${skillPath}`);
+  //   if (!isPathInside(skillPath, normalizedRootDir)) throw new Error(`技能名称无效：检测到路径穿越。${skillPath}`);
+  //   const content = await fs.promises.readFile(skillPath, "utf-8");
+  //   const parsed = parseFrontmatter(content);
+  //   mainSkills.push({ path: skillPath, ...parsed });
+  // }
+
+  const productionSkills = await useProductionSkills(projectInfo?.artStyle!, projectInfo?.directorManual!);
+
+  //分镜面板写入
+  const run_sub_agent_storyboard_panel = tool({
+    description: "运行执行subAgent来完成分镜面板写入相关任务",
+    inputSchema: jsonSchema<{ prompt: string }>(promptInput),
+    execute: async ({ prompt }) => {
+      const skill = path.join(u.getPath("skills"), "production_execution_storyboard_panel.md");
+      const systemPrompt = await fs.promises.readFile(skill, "utf-8");
+
+      const addPrompt =
+        "\n【关键】把分镜面板写入工作区：每个分镜一条 <storyboardItem>，属性值必须是本片真实内容，禁止照抄示例占位文字（如'视频描述'/'提示词内容'/'分组'/'视频推荐时间'）。\n" +
+        "示例格式：\n" +
+        "```\n<storyboardItem videoDesc='真实的画面描述' prompt='真实的生成提示词' track='分组名' shouldGenerateImage='true' duration='5' associateAssetsIds='[1,2,3]'></storyboardItem>\n```";
+
+      return runAgent({
+        key: "productionAgent:storyboardPanelAgent",
+        prompt,
+        system: systemPrompt + addPrompt,
+        name: "执行导演",
+        memoryKey: "assistant:execution",
+        messages: [
+          { role: "assistant", content: productionSkills.prompt + `\n${modelInfo}` },
+          { role: "user", content: prompt + addPrompt },
+        ],
+        tools: { activate_skill: productionSkills.tools.activate_skill },
+      });
+    },
+  });
+
+  //分镜表写入
+  const run_sub_agent_storyboard_table = tool({
+    description: "运行执行subAgent来完成分镜表构建相关任务",
+    inputSchema: jsonSchema<{ prompt: string }>(promptInput),
+    execute: async ({ prompt }) => {
+      const skill = path.join(u.getPath("skills"), "production_execution_storyboard_table.md");
+      const systemPrompt = await fs.promises.readFile(skill, "utf-8");
+
+      const addPrompt =
+        "\n【关键】把完整分镜表写入工作区：将分镜表 Markdown（场头/片段/每镜的画面描述/时长/景别/运镜/台词/音效/引用资产名称与ID）包裹在 <storyboardTable> 标签内。\n" +
+        "标签内必须是完整内容本身，禁止写'内容'二字占位。示例格式：\n" +
+        "```\n<storyboardTable>\n## 场1：场景名 ｜ 参演角色：...\n\n### 片段一（约Xs）\n**引用资产名称**：[...]\n**引用资产ID**：[...]\n| 序号 | 画面描述 | 时长 | 景别 | 运镜 | 台词 | 音效 |\n...完整表格...\n</storyboardTable>\n```";
+
+      return runAgent({
+        key: "productionAgent:storyboardTableAgent",
+        prompt,
+        system: systemPrompt + addPrompt,
+        name: "执行导演",
+        memoryKey: "assistant:execution",
+        messages: [
+          { role: "assistant", content: productionSkills.prompt + `\n${modelInfo}` },
+          { role: "user", content: prompt + addPrompt },
+        ],
+        tools: { activate_skill: productionSkills.tools.activate_skill },
+      });
+    },
+  });
+
+  const run_sub_agent_supervision = tool({
+    description: "运行监督层subAgent执行独立任务，完成后返回结果",
+    inputSchema: jsonSchema<{ prompt: string }>(promptInput),
+    execute: async ({ prompt }) => {
+      const skill = path.join(u.getPath("skills"), "production_agent_supervision.md");
+      const systemPrompt = await fs.promises.readFile(skill, "utf-8");
+      return runAgent({
+        key: "productionAgent:supervisionAgent",
+        prompt,
+        system: systemPrompt,
+        name: "监制",
+        memoryKey: "assistant:supervision",
+      });
+    },
+  });
+
+  return {
+    run_sub_agent_derive_assets,
+    run_sub_agent_generate_assets,
+    run_sub_agent_director_plan,
+    run_sub_agent_storyboard_gen,
+    run_sub_agent_storyboard_panel,
+    run_sub_agent_storyboard_table,
+    run_sub_agent_supervision,
+  };
+}
+
+async function createArtSkills(artName: string, storyName: string) {
+  const artWorkerPath = u.getPath(["skills", "art_skills", artName, "driector_skills"]);
+  const storyWorkerPath = u.getPath(["skills", "story_skills", storyName, "driector_skills"]);
+  const skillList = [...(await scanSkills(artWorkerPath + "/*.md")), ...(await scanSkills(storyWorkerPath + "/*.md"))];
+  const mainSkills: { path: string; name: string; description: string }[] = [];
+  for (const skillPath of skillList) {
+    if (!fs.existsSync(skillPath)) throw new Error(`主技能文件不存在: ${skillPath}`);
+    const content = await fs.promises.readFile(skillPath, "utf-8");
+    const parsed = parseFrontmatter(content);
+    mainSkills.push({ path: skillPath, ...parsed });
+  }
+  const res = {
+    prompt: `## Skills
+以下技能提供了专业任务的专用指令。
+当任务与某个技能的描述匹配时，调用 activate_skill 工具并传入技能名称来加载完整指令。
+${buildSkillPrompt(mainSkills)}`,
+    tools: createSkillTools(mainSkills, { mainSkill: mainSkills, secondarySkills: [], tertiarySkills: [] }),
+  };
+  return res;
+}
+async function consumeFullStream(
+  fullStream: AsyncIterable<any>,
+  initialMsg: ReturnType<ResTool["newMessage"]>,
+  syncMsg?: () => ReturnType<ResTool["newMessage"]>,
+): Promise<string> {
+  let msg = initialMsg;
+  let text = msg.text();
+  let thinking: ReturnType<typeof msg.thinking> | null = null;
+  let thinkTime = 0;
+  let fullResponse = "";
+
+  try {
+    for await (const chunk of fullStream) {
+      if (syncMsg) {
+        const newMsg = syncMsg();
+        if (newMsg !== msg) {
+          msg = newMsg;
+          text = msg.text();
+        }
+      }
+      if (chunk.type === "reasoning-start") {
+        thinkTime = Date.now();
+        thinking = msg.thinking("思考中...");
+      } else if (chunk.type === "reasoning-delta") {
+        thinking?.append(chunk.text);
+      } else if (chunk.type === "reasoning-end") {
+        thinkTime = Date.now() - thinkTime;
+        thinking?.updateTitle(`思考完毕（${(thinkTime / 1000).toFixed(1)} 秒）`);
+        thinking?.complete();
+        thinking = null;
+      } else if (chunk.type === "text-delta") {
+        text.append(chunk.text);
+        fullResponse += chunk.text;
+      } else if (chunk.type === "error") {
+        throw chunk.error;
+      } else if (chunk.type == "finish") {
+        break;
+      }
+    }
+    text.complete();
+    msg.complete();
+  } catch (err: any) {
+    thinking?.complete();
+    const errMsg = err?.message ?? String(err);
+    text.append(errMsg);
+    text.error();
+    msg.error();
+    throw err;
+  }
+
+  return fullResponse;
+}
+function removeAllXmlTags(text: string): string {
+  text = text.replace(/<([a-zA-Z][\w-]*)(\s+[^>]*)?>([\s\S]*?)<\/\1>/g, "");
+  text = text.replace(/<([a-zA-Z][\w-]*)(\s+[^>]*)?\/>/g, "");
+  text = text.replace(/<\/?[a-zA-Z][\w-]*(\s+[^>]*)?>/g, "");
+  return text.trim();
+}
+
+/**
+ * 判断 autoPersist 提取到的标签内容是否为真实内容（而非 LLM 照抄模板的占位符）。
+ * 8-14 事故: 模板示例 `<storyboardTable>内容</storyboardTable>` 的"内容"二字被 LLM 照抄,
+ * autoPersist 原样写入覆盖了 A 级分镜表 → 监督层读到"内容"无法审核。
+ * 真实的分镜表/拍摄计划至少应有表格结构(含 `|`/换行), 长度不会小于 20 字符。
+ */
+function isValidPersistContent(content: string): boolean {
+  if (!content || content.length < 20) return false;
+  if (/^(内容|此处填写|占位|待填|待补充|TODO|xxx|...|\s*)$/.test(content.trim())) return false;
+  // 真实表格类内容至少包含表格分隔符或换行结构
+  return true;
+}
+
+/**
+ * ★ 关键修复 (2026-08-13 主人反馈):
+ * 之前 sub-agent 输出的 <scriptPlan> <storyboardTable> <storyboardItem> XML 飘在 LLM 文本流里,
+ * 没有任何代码把数据真的写到 o_agentWorkData 或 o_storyboard, 监督层 get_flowData() 永远拿到空.
+ * 现在 runAgent 收完 stream 后自动正则匹配 + 直接写库, 不再依赖 client reverse emit.
+ *
+ * parse 目标:
+ *   - <scriptPlan>...</scriptPlan>  -> o_agentWorkData.productionAgent.scriptPlan
+ *   - <storyboardTable>...</storyboardTable> -> o_agentWorkData.productionAgent.storyboardTable
+ *   - <storyboardItem ...>...</storyboardItem> 或自闭合 <storyboardItem .../>
+ *       -> o_agentWorkData.productionAgent.storyboard[] (累积)
+ *       -> 同时尝试落 o_storyboard (如果该 id 不存在, 则视为新分镜, 调 addStoryboard API)
+ */
+async function autoPersistSubAgentOutput(
+  projectId: number,
+  scriptId: number,
+  text: string,
+): Promise<void> {
+  const saved: string[] = [];
+  try {
+    // 1. <scriptPlan>
+    const spMatch = text.match(/<scriptPlan>([\s\S]*?)<\/scriptPlan>/);
+    if (spMatch) {
+      const content = spMatch[1].trim();
+      // 防覆盖保护 (8-14 事故): LLM 可能照抄模板示例占位（"内容"二字）或输出过短占位,
+      // 已有真实数据时拒绝覆盖, 避免完整内容被冲掉
+      if (isValidPersistContent(content)) {
+        await upsertAgentWorkData(projectId, scriptId, "productionAgent", "scriptPlan", content);
+        saved.push(`scriptPlan(${content.length})`);
+      } else {
+        console.warn(`[productionAgent autoPersist] scriptPlan 疑似占位内容(len=${content.length}): "${content.slice(0, 20)}", 跳过写入避免覆盖`);
+      }
+    }
+
+    // 2. <storyboardTable>
+    const stMatch = text.match(/<storyboardTable>([\s\S]*?)<\/storyboardTable>/);
+    if (stMatch) {
+      const content = stMatch[1].trim();
+      if (isValidPersistContent(content)) {
+        await upsertAgentWorkData(projectId, scriptId, "productionAgent", "storyboardTable", content);
+        saved.push(`storyboardTable(${content.length})`);
+      } else {
+        console.warn(`[productionAgent autoPersist] storyboardTable 疑似占位内容(len=${content.length}): "${content.slice(0, 20)}", 跳过写入避免覆盖`);
+      }
+    }
+
+    // 3. <storyboardItem>...</storyboardItem> 或自闭合 <storyboardItem .../>
+    // 属性都在开始标签上, 例如:
+    //   <storyboardItem videoDesc='...' prompt='...' track='...' duration='5'
+    //                   shouldGenerateImage='true' associateAssetsIds='[1,2]'></storyboardItem>
+    const sbRegex = /<storyboardItem\b([^>]*?)\/?>(?:[\s\S]*?<\/storyboardItem>)?/g;
+    const sbList: any[] = [];
+    let sbMatch: RegExpExecArray | null;
+    while ((sbMatch = sbRegex.exec(text)) !== null) {
+      const attrStr = sbMatch[1] || "";
+      const obj: any = { associateAssetsIds: [] };
+      // 解析属性
+      const attrRegex = /(\w+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
+      let aMatch: RegExpExecArray | null;
+      while ((aMatch = attrRegex.exec(attrStr)) !== null) {
+        const key = aMatch[1];
+        const val = aMatch[2] ?? aMatch[3] ?? "";
+        if (key === "associateAssetsIds") {
+          // 形如 "[1,2,3]" 解析成 number[]
+          try {
+            obj.associateAssetsIds = JSON.parse(val.replace(/'/g, '"'));
+          } catch {
+            obj.associateAssetsIds = [];
+          }
+        } else if (key === "duration") {
+          obj.duration = parseFloat(val) || 5;
+        } else {
+          obj[key] = val;
+        }
+      }
+      if (obj.videoDesc || obj.prompt) {
+        // 防占位符 (8-14): LLM 可能照抄模板示例属性值（视频描述/提示词内容/分组/视频推荐时间）
+        const vDesc = String(obj.videoDesc || "");
+        const vPrompt = String(obj.prompt || "");
+        const isPlaceholder = /^(视频描述|提示词内容|分组|视频推荐时间|真实.*)$/.test(vDesc.trim()) ||
+          /^(提示词内容|视频描述|真实.*)$/.test(vPrompt.trim());
+        if (!isPlaceholder) sbList.push(obj);
+      }
+    }
+    if (sbList.length) {
+      // 累积到 o_agentWorkData.productionAgent.storyboard[]
+      const row: any = await u
+        .db("o_agentWorkData")
+        .where("projectId", String(projectId))
+        .andWhere("episodesId", String(scriptId))
+        .andWhere("key", "productionAgent")
+        .first();
+      let data: any = {};
+      if (row && row.data) {
+        try { data = JSON.parse(row.data); } catch {}
+      }
+      const existing = Array.isArray(data.storyboard) ? data.storyboard : [];
+      // 按 videoDesc 去重 (新 sub-agent 输出可能重写)
+      const map: Record<string, any> = {};
+      for (const sb of existing) if (sb.videoDesc) map[sb.videoDesc] = sb;
+      for (const sb of sbList) if (sb.videoDesc) map[sb.videoDesc] = sb;
+      data.storyboard = Object.values(map);
+      if (row) {
+        await u.db("o_agentWorkData").where({ id: row.id }).update({ data: JSON.stringify(data) });
+      } else {
+        await u.db("o_agentWorkData").insert({ projectId, episodesId: scriptId, key: "productionAgent", data: JSON.stringify(data) });
+      }
+      saved.push(`storyboardItem×${sbList.length}`);
+
+      // 同步尝试把 storyboardItem 落到 o_storyboard (如果还没存在)
+      for (const sb of sbList) {
+        // 没有 id 字段的, 是新分镜, 尝试通过 addStoryboard 风格的方式 insert
+        if (sb.id) continue;  // 已存在的跳过
+        // 这里只记录意图, 不直接 insert (因为 associateAssetsIds 还要 resolve 真实 asset id)
+        // 真正的落库留给 supervisor 后续 sub-agent 调用 add_flowData_storyboard 时处理
+      }
+    }
+
+    if (saved.length) {
+      console.info(`[productionAgent autoPersist] project=${projectId} script=${scriptId} saved: ${saved.join(", ")}`);
+    }
+  } catch (e) {
+    console.error("[productionAgent autoPersist] error:", e);
+  }
+}
+
+/** 合并写入 o_agentWorkData (按 projectId+episodesId+key 找到行, 解析 data JSON, 覆盖指定字段) */
+async function upsertAgentWorkData(
+  projectId: number,
+  scriptId: number,
+  key: string,
+  field: string,
+  value: any,
+): Promise<void> {
+  const row: any = await u
+    .db("o_agentWorkData")
+    .where("projectId", String(projectId))
+    .andWhere("episodesId", String(scriptId))
+    .andWhere("key", key)
+    .first();
+  let data: any = {};
+  if (row && row.data) {
+    try { data = JSON.parse(row.data); } catch {}
+  }
+  data[field] = value;
+  if (row) {
+    await u.db("o_agentWorkData").where({ id: row.id }).update({ data: JSON.stringify(data) });
+  } else {
+    await u.db("o_agentWorkData").insert({ projectId, episodesId: scriptId, key, data: JSON.stringify(data) });
+  }
+}
+
+export function buildSkillPrompt(skills: { name: string; description: string }[]): string {
+  const skillEntries = skills
+    .map((s) => `  <skill>\n    <name>${s.name}</name>\n    <description>${s.description}</description>\n  </skill>`)
+    .join("\n");
+  return `
+<available_skills>
+${skillEntries}
+</available_skills>`;
+}
+
+async function useProductionSkills(artName: string, storyName: string) {
+  const artWorkerPath = u.getPath(["skills", "art_skills", artName, "driector_skills"]);
+  const storyWorkerPath = u.getPath(["skills", "story_skills", storyName, "driector_skills"]);
+  const productionPath = u.getPath(["skills", "production_skills"]);
+  const skillList = [
+    ...(await scanSkills(artWorkerPath + "/*.md")),
+    ...(await scanSkills(storyWorkerPath + "/*.md")),
+    ...(await scanSkills(productionPath + "/*.md")),
+  ];
+  const mainSkills: { path: string; name: string; description: string }[] = [];
+  for (const skillPath of skillList) {
+    if (!fs.existsSync(skillPath)) throw new Error(`主技能文件不存在: ${skillPath}`);
+    const content = await fs.promises.readFile(skillPath, "utf-8");
+    const parsed = parseFrontmatter(content);
+    mainSkills.push({ path: skillPath, ...parsed });
+  }
+  const res = {
+    prompt: `## Skills
+以下技能提供了专业任务的专用指令。
+当任务与某个技能的描述匹配时，调用 activate_skill 工具并传入技能名称来加载完整指令。
+${buildSkillPrompt(mainSkills)}`,
+    tools: createSkillTools(mainSkills, { mainSkill: mainSkills, secondarySkills: [], tertiarySkills: [] }),
+  };
+  return res;
+}
