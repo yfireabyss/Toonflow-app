@@ -202,7 +202,7 @@ async function tempOnsert(tsCode: string) {
     id: vendor.id,
     inputValues: JSON.stringify(vendor.inputValues ?? {}),
     models: JSON.stringify([]),
-    enable: vendor.id == "toonflow" ? 1 : 0,
+    enable: vendor.id == "toonflow" || vendor.id == "comfyui" ? 1 : 0,
   });
   u.vendor.writeCode(vendor.id, tsCode);
 }

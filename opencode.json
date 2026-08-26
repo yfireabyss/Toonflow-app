@@ -1,0 +1,22 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": ["AGENTS.md", "TOONFLOW.md"],
+  "references": {
+    "skills": {
+      "path": "data/skills",
+      "description": "AI 短剧制作技能库（toonflow 吸收）：生产/剧本流水线执行层 skill、art_skills 美术风格、story_skills 题材、production_skills 技法。写作分镜、生成角色/场景/道具/分镜提示词时按需读取"
+    },
+    "modelPrompt": {
+      "path": "data/modelPrompt",
+      "description": "视频提示词生成模式（4 种：wan2.6 单图首帧 / seedance2 多参 / 通用首尾帧 / 通用多参）。导出视频生成提示词时按目标模型 mode 匹配使用"
+    },
+    "vendor": {
+      "path": "data/vendor",
+      "description": "供应商模型配置模板（deepseek/openai/minimax/klingai/volcengine/…）：各模型 type/mode/字典。需确认某模型支持的首尾帧或多参能力时读取"
+    },
+    "workflows": {
+      "path": "data/workflows",
+      "description": "ComfyUI 视频工作流目录规范与命名规则（__toonflow_meta__ 节点标注约定）"
+    }
+  }
+}
