@@ -367,6 +367,12 @@ const vendor: VendorConfig = {
       mode: ["text"],
     },
     {
+      name: "FLUX1-dev 文生图 (fp8 + clip_l + t5xxl)",
+      modelName: "flux1-t2i",
+      type: "image",
+      mode: ["text"],
+    },
+    {
       name: "HiDream I1 文生图 (17B fp8 + clip_l/g)",
       modelName: "hidream-t2i",
       type: "image",
@@ -840,6 +846,32 @@ function buildFlux2T2i(prompt: string, width: number, height: number, seed: numb
     },
     "10": { class_type: "VAEDecode", inputs: { samples: ["9", 0], vae: ["3", 0] } },
     "11": { class_type: "SaveImage", inputs: { images: ["10", 0], filename_prefix: "toonflow_flux2" } },
+  };
+}
+
+// ---- FLUX1-dev (2026-08-26 新增) ----
+function buildFlux1T2i(prompt: string, width: number, height: number, seed: number): any {
+  // FLUX1-dev fp8: UNETLoader(flux1-dev-fp8) + DualCLIPLoader(clip_l + t5xxl, type=flux) + VAELoader(ae)
+  // 链路: UNET → ModelSamplingFlux → KSampler (euler, simple, steps 20, cfg 1, guidance 3.5) → VAEDecode → SaveImage
+  // 显存 ~13GB (fp8 unet 11GB + 临时 ~2GB), 16GB 满载
+  return {
+    "1": { class_type: "UNETLoader", inputs: { unet_name: "flux\\flux1-dev-fp8-e4m3fn.safetensors", weight_dtype: "default" } },
+    "2": { class_type: "DualCLIPLoader", inputs: { clip_name1: "clip_l.safetensors", clip_name2: "t5xxl_fp16.safetensors", type: "flux", device: "default" } },
+    "3": { class_type: "VAELoader", inputs: { vae_name: "ae.safetensors" } },
+    "4": { class_type: "ModelSamplingFlux", inputs: { model: ["1", 0], max_shift: 1.15, base_shift: 0.5, width, height } },
+    "5": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: prompt } },
+    "6": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: NEGATIVE_DEFAULT } },
+    "7": { class_type: "FluxGuidance", inputs: { conditioning: ["5", 0], guidance: 3.5 } },
+    "8": { class_type: "EmptyLatentImage", inputs: { width, height, batch_size: 1 } },
+    "9": {
+      class_type: "KSampler",
+      inputs: {
+        model: ["4", 0], positive: ["7", 0], negative: ["6", 0], latent_image: ["8", 0],
+        seed, steps: 20, cfg: 1, sampler_name: "euler", scheduler: "simple", denoise: 1.0,
+      },
+    },
+    "10": { class_type: "VAEDecode", inputs: { samples: ["9", 0], vae: ["3", 0] } },
+    "11": { class_type: "SaveImage", inputs: { images: ["10", 0], filename_prefix: "toonflow_flux1" } },
   };
 }
 
@@ -2152,6 +2184,9 @@ const imageRequest = async (config: ImageConfig, model: ImageModel): Promise<str
         break;
       case "flux2-t2i":
         wf = buildFlux2T2i(config.prompt, w, h, seed);
+        break;
+      case "flux1-t2i":
+        wf = buildFlux1T2i(config.prompt, w, h, seed);
         break;
       case "hidream-t2i":
         wf = buildHidreamT2i(config.prompt, w, h, seed);

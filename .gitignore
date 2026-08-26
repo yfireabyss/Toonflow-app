@@ -55,3 +55,9 @@ database.d.ts
 data/oss/*
 data/test.sqlite
 version.txt
+
+# 构建产物（AGENTS.md 强制：不要提交 data/serve/app.js）
+data/serve/app.js
+
+# 本地调试产物
+__repro_batch.out
