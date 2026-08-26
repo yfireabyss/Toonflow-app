@@ -136,7 +136,7 @@ const vendor: VendorConfig = {
   author: "Mavis (本机 ComfyUI 适配 v2)",
   name: "本机 ComfyUI v2",
   description:
-    "## 本机 ComfyUI 直连供应商 v2\n\n通过 ComfyUI 8188 HTTP API 调用本机已部署的 ComfyUI 出图/出视频。\n\n**16 个核心 model（全部端到端实测可跑）**\n\n### 图像（9 个）\n- **SDXL 文生图** - sd_xl_base_1.0（base+refiner）\n- **Z-image Turbo** - z_image_turbo_bf16（8 步快速出图）\n- **简易自动出图** - DreamShaper 8（SD1.5，最快 8 步）\n- **自动出图工作流** - SDXL base（自动选 checkpoint）\n- **SD 放大** - Realistic Vision V5（image-to-image 放大）\n- **FaceDetailer 脸部增强** - SD1.5 + Detailer\n- **增强肖像模板** - SDXL + 肖像增强\n- **Hires fix 高清修复** - SDXL + Hires fix\n- **基础超分辨率** - SDXL + 4x-Ultrasharp\n\n### 视频（7 个）\n- **LTX-2B 旧版文生视频** - ltx-video-2b（轻量）\n- **LTX-2.3 满血 fp8 文生视频** - ltx-2.3-22b-dev-fp8（30 步高质量）\n- **LTX-2.3 nvfp4 图生视频** - ltx-2.3-22b-dev-nvfp4（i2v，8 步快速）\n- **LTX-2.3 首尾帧 v1** - ltxv-13b-0.9.8-distilled-fp8 + LTX 节点链\n- **LTX-2.3 首尾双图流满血** - ltx-2.3-22b-dev-fp8 + distilled lora\n- **LTX-2.3 视频修复** - 22B fp8 + SeedVR2\n\n**跑不通**（本机缺模型/节点）：FLUX2/HiDream/Qwen-T2I/Qwen-Edit/FireRed-Edit/SCAIL/Qwen3-TTS/Hunyuan/Qwen-2511\n\n**已删除**（8/13 主人指令）：1-WAN(partner API)、Wan 2.2 Animate NVFP4（生图/视频都不走）",
+    "## 本机 ComfyUI 直连供应商 v2\n\n通过 ComfyUI 8188 HTTP API 调用本机已部署的 ComfyUI 出图/出视频。\n\n**29 个核心 model（全部端到端实测可跑）**\n\n### 图像（12 个）\n- **SDXL 文生图** - sd_xl_base_1.0（base+refiner）\n- **FLUX2 文生图** - flux2_dev_fp8mixed + mistral clip + small decoder VAE\n- **FLUX1-dev 文生图** - flux1-dev-fp8-e4m3fn + clip_l + t5xxl（2026-08-26 新增）\n- **FLUX2 + Turbo LoRA** - 4 步极速出图（Flux_2-Turbo-LoRA）\n- **Z-image Turbo** - z_image_turbo_bf16（8 步快速出图）\n- **简易自动出图** - DreamShaper 8（SD1.5，最快 8 步）\n- **自动出图工作流** - SDXL base（自动选 checkpoint）\n- **SD 放大** - Realistic Vision V5（image-to-image 放大）\n- **FaceDetailer 脸部增强** - SD1.5 + Detailer\n- **增强肖像模板** - SDXL + 肖像增强\n- **Hires fix 高清修复** - SDXL + Hires fix\n- **基础超分辨率** - SDXL + 4x-Ultrasharp\n\n### 视频（17 个）\n- **LTX-2B 旧版文生视频** - ltx-video-2b（轻量）\n- **LTX-2.3 满血 fp8 文生视频** - ltx-2.3-22b-dev-fp8（30 步高质量）\n- **LTX-2.3 nvfp4 图生视频** - ltx-2.3-22b-dev-nvfp4（i2v，8 步快速）\n- **LTX-2.3 首尾帧 v1** - ltxv-13b-0.9.8-distilled-fp8 + LTX 节点链\n- **LTX-2.3 首尾双图流满血** - ltx-2.3-22b-dev-fp8 + distilled lora\n- **LTX-2.3 视频修复** - 22B fp8 + SeedVR2\n- **MiniMax-H3 FL2VA 首帧图生视频** - minimax_h3_fl2va + 双 VAE（单图 → 视频+音频，2026-08-26 新增）\n- **MiniMax-H3 Ref2VA 图片参考** - minimax_h3_ref2va + 双 VAE（1 张 ref 图 → 视频，2026-08-26 新增）\n- **MiniMax-H3 T2VA 文生视频+音频** - 纯文字描述 → 视频+音频（2026-08-26 新增）\n- **MiniMax-H3 V2A 视频转音频** - 源视频 → 加音轨（2026-08-26 新增）\n\n**跑不通**（本机缺模型/节点）：FireRed-Edit/SCAIL/Qwen3-TTS/Qwen-2511\n\n**已删除**（8/13 主人指令）：1-WAN(partner API)、Wan 2.2 Animate NVFP4（生图/视频都不走）",
   inputs: [
     { key: "baseUrl", label: "ComfyUI 服务地址", type: "url", required: true, placeholder: "http://127.0.0.1:8188" },
     { key: "apiKey", label: "ComfyUI API Key（可选，本机无 auth 留空）", type: "password", required: false, placeholder: "本机默认无认证，留空" },
@@ -231,6 +231,47 @@ const vendor: VendorConfig = {
       audio: false,
       durationResolutionMap: [
         { duration: [5, 8, 10, 12, 15, 20, 25], resolution: ["480p", "720p"] },
+      ],
+    },
+    // ---- MiniMax-H3 轻量版 (2026-08-26 新增) ----
+    {
+      name: "MiniMax-H3 FL2VA 首帧图生视频 (单图 → 视频+音频)",
+      modelName: "h3-fl2va-first",
+      type: "video",
+      mode: ["singleImage"],
+      audio: false,
+      durationResolutionMap: [
+        { duration: [4, 5, 8, 10, 12, 15], resolution: ["480p", "720p"] },
+      ],
+    },
+    {
+      name: "MiniMax-H3 Ref2VA 图片参考生视频 (1 张 ref 图)",
+      modelName: "h3-ref2va-image",
+      type: "video",
+      mode: ["imageReference:1"],
+      audio: false,
+      durationResolutionMap: [
+        { duration: [4, 5, 8, 10, 12, 15], resolution: ["480p", "720p"] },
+      ],
+    },
+    {
+      name: "MiniMax-H3 T2VA 文生视频+音频 (无参考)",
+      modelName: "h3-t2va",
+      type: "video",
+      mode: ["text"],
+      audio: false,
+      durationResolutionMap: [
+        { duration: [4, 5, 8, 10, 12, 15], resolution: ["480p", "720p"] },
+      ],
+    },
+    {
+      name: "MiniMax-H3 V2A 视频转音频 (源视频 + 加音轨)",
+      modelName: "h3-v2a",
+      type: "video",
+      mode: ["videoReference:1"],
+      audio: false,
+      durationResolutionMap: [
+        { duration: [4, 5, 8, 10, 12, 15], resolution: ["480p", "720p"] },
       ],
     },
     {
@@ -872,6 +913,248 @@ function buildFlux1T2i(prompt: string, width: number, height: number, seed: numb
     },
     "10": { class_type: "VAEDecode", inputs: { samples: ["9", 0], vae: ["3", 0] } },
     "11": { class_type: "SaveImage", inputs: { images: ["10", 0], filename_prefix: "toonflow_flux1" } },
+  };
+}
+
+// ---- MiniMax-H3 轻量版 (2026-08-26 新增) ----
+// 4 个核心 build 函数: FL2VA 首帧图生视频 / Ref2VA 图片参考 / T2VA 文生视频+音频 / V2A 视频转音频
+// 节点顺序与 8188 上对应工作流 JSON (user/default/workflows/*.json) 一致
+// INPUT_TYPES 字段名来自: 10600 ComfyUI_RH_MinMaxH3/custom_nodes/ (api/*.py)
+// 服务端在 8188 上必须有 ComfyUI_RH_MinMaxH3 custom_nodes 才能执行
+
+// H3-1: FL2VA 首帧图生视频 (singleImage 模式)
+function buildMiniMaxH3FL2VAFirstFrame(
+  prompt: string, firstFrameImg: string,
+  width: number, height: number, length: number, seed: number,
+): any {
+  return {
+    "1": { class_type: "RHMiniMaxH3TextEncoderLoader", inputs: {
+      model_root: "MiniMax-H3", dtype: "auto",
+      text_encoder_path: "qwen3-vl-32b-int8_convrot.safetensors",
+    }},
+    "2": { class_type: "RHMiniMaxH3ModelLoader", inputs: {
+      partition: "FL2VA", model_root: "MiniMax-H3", dtype: "auto",
+      transformer_path: "MiniMax-H3-FL2VA-int8_convrot.safetensors",
+    }},
+    "3": { class_type: "RHMiniMaxH3VAELoader", inputs: {
+      model_root: "MiniMax-H3",
+      video_vae: "MiniMax-H3-video_vae.safetensors",
+      audio_vae: "MiniMax-H3-audio_vae.safetensors",
+    }},
+    "4": { class_type: "LoadImage", inputs: { image: firstFrameImg }},
+    "5": { class_type: "RHMiniMaxH3FL2VAFirstFrameCondition", inputs: {
+      first_frame: ["4", 0],
+    }},
+    "6": { class_type: "RHMiniMaxH3FL2VATarget", inputs: {
+      keyframes: ["5", 0],
+      aspect_ratio: "16:9", duration_seconds: length, width, height,
+    }},
+    "7": { class_type: "RHMiniMaxH3FL2VAEncode", inputs: {
+      h3_text_encoder: ["1", 0], h3_vae_bundle: ["3", 0],
+      target: ["6", 0], keyframes: ["5", 0],
+      prompt,
+    }},
+    "8": { class_type: "RHMiniMaxH3EmptyAVLatent", inputs: { target: ["6", 0] }},
+    "9": { class_type: "RHMiniMaxH3DualSigmaSampler", inputs: {
+      h3_model: ["2", 0], conditioning: ["7", 0], av_latent: ["8", 0],
+      seed, sigma_points: 21,
+      video_shift: 12.0, audio_shift: 3.0,
+      accel: "off", denoise_video: true,
+      cache_dit_rdt: 0.12, cache_dit_mc: 2, cache_dit_warmup: 4,
+      velocity_stride: 4,
+      sampler_mode: "res_multistep",
+      allow_accel_with_res_multistep: false,
+    }},
+    "10": { class_type: "RHMiniMaxH3DecodeAV", inputs: {
+      h3_vae_bundle: ["3", 0], sampled_av_latent: ["9", 0],
+    }},
+    "11": { class_type: "CreateVideo", inputs: {
+      images: ["10", 0], audio: ["10", 1], fps: 24, bit_depth: 8,
+    }},
+    "12": { class_type: "SaveVideo", inputs: {
+      video: ["11", 0],
+      filename_prefix: "minimax_h3/fl2va_first_frame",
+      format: "mp4", codec: "h264",
+    }},
+  };
+}
+
+// H3-2: Ref2VA 图片参考 (imageReference 模式, 单张图片参考)
+function buildMiniMaxH3Ref2VAImageRef(
+  prompt: string, refImg: string,
+  width: number, height: number, length: number, seed: number,
+): any {
+  return {
+    "1": { class_type: "RHMiniMaxH3TextEncoderLoader", inputs: {
+      partition: "Ref2VA", model_root: "MiniMax-H3", dtype: "auto",
+      text_encoder_path: "qwen3-vl-32b-int8_convrot.safetensors",
+    }},
+    "2": { class_type: "RHMiniMaxH3ModelLoader", inputs: {
+      partition: "Ref2VA", model_root: "MiniMax-H3", dtype: "auto",
+      transformer_path: "MiniMax-H3-Ref2VA-int8_convrot.safetensors",
+    }},
+    "3": { class_type: "RHMiniMaxH3VAELoader", inputs: {
+      model_root: "MiniMax-H3",
+      video_vae: "MiniMax-H3-video_vae.safetensors",
+      audio_vae: "MiniMax-H3-audio_vae.safetensors",
+    }},
+    "4": { class_type: "LoadImage", inputs: { image: refImg }},
+    "5": { class_type: "RHMiniMaxH3Ref2VAImageReference", inputs: {
+      image: ["4", 0],
+    }},
+    "6": { class_type: "RHMiniMaxH3Ref2VATarget", inputs: {
+      references: ["5", 0],
+      aspect_ratio: "16:9", duration_seconds: length, width, height,
+    }},
+    "7": { class_type: "RHMiniMaxH3Ref2VAEncode", inputs: {
+      h3_text_encoder: ["1", 0], h3_vae_bundle: ["3", 0],
+      target: ["6", 0], references: ["5", 0],
+      prompt,
+      // strength_mode: "match" (widget 1 默认)
+      strength_mode: "match",
+    }},
+    "8": { class_type: "RHMiniMaxH3EmptyAVLatent", inputs: { target: ["6", 0] }},
+    "9": { class_type: "RHMiniMaxH3DualSigmaSampler", inputs: {
+      h3_model: ["2", 0], conditioning: ["7", 0], av_latent: ["8", 0],
+      seed, sigma_points: 21,
+      video_shift: 12.0, audio_shift: 3.0,
+      accel: "off", denoise_video: true,
+      cache_dit_rdt: 0.12, cache_dit_mc: 2, cache_dit_warmup: 4,
+      velocity_stride: 4,
+      sampler_mode: "res_multistep",
+      allow_accel_with_res_multistep: false,
+    }},
+    "10": { class_type: "RHMiniMaxH3DecodeAV", inputs: {
+      h3_vae_bundle: ["3", 0], sampled_av_latent: ["9", 0],
+    }},
+    "11": { class_type: "CreateVideo", inputs: {
+      images: ["10", 0], audio: ["10", 1], fps: 24, bit_depth: 8,
+    }},
+    "12": { class_type: "SaveVideo", inputs: {
+      video: ["11", 0],
+      filename_prefix: "minimax_h3/ref2va_image",
+      format: "mp4", codec: "h264",
+    }},
+  };
+}
+
+// H3-3: T2VA 文生视频+音频 (text 模式, 无参考图)
+function buildMiniMaxH3T2VA(
+  prompt: string,
+  width: number, height: number, length: number, seed: number,
+): any {
+  return {
+    "1": { class_type: "RHMiniMaxH3DirectTextEncoderLoader", inputs: {
+      model_root: "MiniMax-H3", dtype: "auto",
+      text_encoder_path: "qwen3-vl-32b-int8_convrot.safetensors",
+    }},
+    "2": { class_type: "RHMiniMaxH3DirectModelLoader", inputs: {
+      model_root: "MiniMax-H3", dtype: "auto",
+      transformer_path: "MiniMax-H3-FL2VA-int8_convrot.safetensors",
+    }},
+    "3": { class_type: "RHMiniMaxH3DirectVAELoader", inputs: {
+      model_root: "MiniMax-H3",
+      video_vae: "MiniMax-H3-video_vae.safetensors",
+      audio_vae: "MiniMax-H3-audio_vae.safetensors",
+    }},
+    "4": { class_type: "RHMiniMaxH3T2VATarget", inputs: {
+      aspect_ratio: "16:9", duration_seconds: length, width, height,
+    }},
+    "5": { class_type: "RHMiniMaxH3T2VATextEncode", inputs: {
+      h3_text_encoder: ["1", 0], prompt,
+    }},
+    "6": { class_type: "RHMiniMaxH3EmptyAVLatent", inputs: { target: ["4", 0] }},
+    "7": { class_type: "RHMiniMaxH3DualSigmaSampler", inputs: {
+      h3_model: ["2", 0], conditioning: ["5", 0], av_latent: ["6", 0],
+      seed, sigma_points: 21,
+      video_shift: 12.0, audio_shift: 3.0,
+      accel: "off", denoise_video: true,
+      cache_dit_rdt: 0.12, cache_dit_mc: 2, cache_dit_warmup: 4,
+      velocity_stride: 4,
+      sampler_mode: "res_multistep",
+      allow_accel_with_res_multistep: false,
+    }},
+    "8": { class_type: "RHMiniMaxH3DecodeAV", inputs: {
+      h3_vae_bundle: ["3", 0], sampled_av_latent: ["7", 0],
+    }},
+    "9": { class_type: "CreateVideo", inputs: {
+      images: ["8", 0], audio: ["8", 1], fps: 24, bit_depth: 8,
+    }},
+    "10": { class_type: "SaveVideo", inputs: {
+      video: ["9", 0],
+      filename_prefix: "minimax_h3/t2va",
+      format: "mp4", codec: "h264",
+    }},
+  };
+}
+
+// H3-4: V2A 视频转音频 (videoReference 模式, 给已有视频加音频)
+function buildMiniMaxH3V2A(
+  sourceVideo: string, prompt: string,
+  width: number, height: number, length: number, seed: number,
+): any {
+  return {
+    "1": { class_type: "RHMiniMaxH3DirectTextEncoderLoader", inputs: {
+      model_root: "MiniMax-H3", dtype: "auto",
+      text_encoder_path: "qwen3-vl-32b-int8_convrot.safetensors",
+    }},
+    "2": { class_type: "RHMiniMaxH3DirectModelLoader", inputs: {
+      model_root: "MiniMax-H3", dtype: "auto",
+      transformer_path: "MiniMax-H3-FL2VA-int8_convrot.safetensors",
+    }},
+    "3": { class_type: "RHMiniMaxH3DirectVAELoader", inputs: {
+      model_root: "MiniMax-H3",
+      video_vae: "MiniMax-H3-video_vae.safetensors",
+      audio_vae: "MiniMax-H3-audio_vae.safetensors",
+    }},
+    "4": { class_type: "LoadVideo", inputs: { video: sourceVideo }},
+    "5": { class_type: "GetVideoComponents", inputs: { video: ["4", 0] }},
+    "6": { class_type: "ImageScale", inputs: { image: ["5", 0], method: "lanczos", width, height, crop: "center" }},
+    "7": { class_type: "RHMiniMaxH3FrameRate", inputs: {
+      h3_model: ["2", 0],
+      fps: 24.0, audio_active: true, latent_t_visualize: false,
+      latent_t_factor: 1.0, latent_t_min: 16, latent_t_mode: "hard",
+      constant_mode: "constant", mode_offset: 0.0,
+    }},
+    "8": { class_type: "RHMiniMaxH3T2VATarget", inputs: {
+      aspect_ratio: "16:9", duration_seconds: length, width, height,
+    }},
+    "9": { class_type: "RHMiniMaxH3T2VATextEncode", inputs: {
+      h3_text_encoder: ["1", 0], prompt,
+    }},
+    "10": { class_type: "RHMiniMaxH3EmptyAVLatent", inputs: { target: ["8", 0] }},
+    "11": { class_type: "RHMiniMaxH3EncodeVideoAVLatent", inputs: {
+      h3_vae_bundle: ["3", 0], av_latent: ["10", 0], frames: ["6", 0],
+      seed, seed_mode: "fixed",
+    }},
+    "12": { class_type: "RHMiniMaxH3SamplerConfig", inputs: {
+      debug_enable: false, debug_scale: 1.2, debug_decay: 0.2,
+      noise_boost: 0.9, max_shift: 4096, force_steps: "",
+      audio_passthrough: false, force_constant_steps: false,
+      constant_strength: 75.0,
+    }},
+    "13": { class_type: "RHMiniMaxH3DualSigmaSampler", inputs: {
+      h3_model: ["2", 0], conditioning: ["9", 0], av_latent: ["11", 0],
+      sampler_config: ["12", 0],
+      seed, sigma_points: 21,
+      video_shift: 12.0, audio_shift: 3.0,
+      accel: "off", denoise_video: false,  // V2A 模式: 不去噪视频
+      cache_dit_rdt: 0.12, cache_dit_mc: 2, cache_dit_warmup: 4,
+      velocity_stride: 4,
+      sampler_mode: "res_multistep",
+      allow_accel_with_res_multistep: false,
+    }},
+    "14": { class_type: "RHMiniMaxH3DecodeAV", inputs: {
+      h3_vae_bundle: ["3", 0], sampled_av_latent: ["13", 0],
+    }},
+    "15": { class_type: "CreateVideo", inputs: {
+      images: ["14", 0], audio: ["14", 1], fps: 24, bit_depth: 8,
+    }},
+    "16": { class_type: "SaveVideo", inputs: {
+      video: ["15", 0],
+      filename_prefix: "minimax_h3/v2a_all_options",
+      format: "auto", codec: "auto",
+    }},
   };
 }
 
@@ -2402,6 +2685,28 @@ const videoRequest = async (config: VideoConfig, model: VideoModel): Promise<str
       // 2026-08-15: SVD 段间过渡 (imageReference:2 = 段末 + 段首)
       if (imageRefs.length < 2) throw new Error("ltx2.3-svd-crossfade 需要 imageReference:2 (段末 + 段首)");
       wf = buildLtxSvdCrossfade(config.prompt, w, h, length, seed, imageRefs[0], imageRefs[1]);
+      break;
+    // ---- MiniMax-H3 轻量版 (2026-08-26 新增) ----
+    case "h3-fl2va-first":
+      // MiniMax-H3 FL2VA 首帧图生视频 (singleImage, 出图+音频)
+      if (!startImg) throw new Error("h3-fl2va-first 需要首图 (singleImage)");
+      wf = buildMiniMaxH3FL2VAFirstFrame(config.prompt, startImg, w, h, length, seed);
+      break;
+    case "h3-ref2va-image":
+      // MiniMax-H3 Ref2VA 图片参考生视频 (imageReference:1)
+      if (!startImg) throw new Error("h3-ref2va-image 需要图片参考 (imageReference:1)");
+      wf = buildMiniMaxH3Ref2VAImageRef(config.prompt, startImg, w, h, length, seed);
+      break;
+    case "h3-t2va":
+      // MiniMax-H3 T2VA 文生视频+音频 (text)
+      wf = buildMiniMaxH3T2VA(config.prompt, w, h, length, seed);
+      break;
+    case "h3-v2a":
+      // MiniMax-H3 V2A 视频转音频 (videoReference:1)
+      // 复用 startImg 变量名 — 但实际是 video, 来源 config.referenceList[0].type==='video'
+      // 视频上传到 8188 input 目录后文件名
+      if (!startImg) throw new Error("h3-v2a 需要视频参考 (videoReference:1, 走 startImg 变量)");
+      wf = buildMiniMaxH3V2A(startImg, config.prompt, w, h, length, seed);
       break;
     case "hunyuan-t2v":
       // 2026-08-13: Hunyuan Video kijai 节点需要 llava-llama-3-8b-text-encoder (未下), 暂时未实现
