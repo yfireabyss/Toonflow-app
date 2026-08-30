@@ -871,7 +871,7 @@ function buildFlux2T2i(prompt: string, width: number, height: number, seed: numb
   // FLUX2: UNETLoader + CLIPLoader(type=flux2) + VAELoader(small decoder) + ModelSamplingFlux + FluxGuidance
   return {
     "1": { class_type: "UNETLoader", inputs: { unet_name: "flux2_dev_fp8mixed.safetensors", weight_dtype: "default" } },
-    "2": { class_type: "CLIPLoader", inputs: { clip_name: "mistral_3_small_flux2_bf16.safetensors", type: "flux2", device: "default" } },
+    "2": { class_type: "CLIPLoader", inputs: { clip_name: "mistral_3_small_flux2_fp8.safetensors", type: "flux2", device: "default" } },
     "3": { class_type: "VAELoader", inputs: { vae_name: "full_encoder_small_decoder.safetensors" } },
     "4": { class_type: "ModelSamplingFlux", inputs: { model: ["1", 0], max_shift: 1.15, base_shift: 0.5, width, height } },
     "5": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: prompt } },
@@ -2325,7 +2325,7 @@ function buildFlux2TurboLora(prompt: string, width: number, height: number, seed
   // Flux2 fp8mixed + Flux_2-Turbo-LoRA (4 步快速)
   return {
     "1": { class_type: "UNETLoader", inputs: { unet_name: "flux2_dev_fp8mixed.safetensors", weight_dtype: "default" } },
-    "2": { class_type: "CLIPLoader", inputs: { clip_name: "mistral_3_small_flux2_bf16.safetensors", type: "flux2", device: "default" } },
+    "2": { class_type: "CLIPLoader", inputs: { clip_name: "mistral_3_small_flux2_fp8.safetensors", type: "flux2", device: "default" } },
     "3": { class_type: "VAELoader", inputs: { vae_name: "full_encoder_small_decoder.safetensors" } },
     "4": { class_type: "LoraLoaderModelOnly", inputs: { model: ["1", 0], lora_name: "Flux_2-Turbo-LoRA_comfyui.safetensors", strength_model: 0.8 } },
     "5": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: prompt } },
