@@ -423,7 +423,10 @@ export default (toolCpnfig: ToolConfig) => {
             headers[hKey] = `Bearer ${bare}`;
           }
           const resp = await axios.post(baseUrl, { data: [pageData], scriptId, projectId }, { headers, timeout: 15000 });
-          const insertedId = resp?.data?.data?.[0]?.id;
+          // 2026-08-31: 取 batchAddStoryboardInfo 新增的 insertedIds[0] 才是本次插入的真实自增 id.
+          // 之前取 data.data[0].id 永远拿到脚本首条 (id=1), 导致 o_agentWorkData.storyboard[] JSON
+          // 里所有条目 id 被推为 1, 引发分镜面板 id 唯一性故障.
+          const insertedId = resp?.data?.data?.insertedIds?.[0];
           // 分镜面板前端读的是 o_agentWorkData.productionAgent.storyboard[] JSON,
           // 不是 o_storyboard 表。落表后同步写 JSON, 模拟前端 socket 接收 addStoryboard 时
           // push 到本地 storyboard 再 setFlowData() 保存的效果, 否则面板仍显示为空。
