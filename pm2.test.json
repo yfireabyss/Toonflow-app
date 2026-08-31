@@ -1,0 +1,12 @@
+{
+  "name": "toonflow-test",
+  "script": "data/serve/app.js",
+  "interpreter": "/home/fireabyss/.nvm/versions/node/v24.16.0/bin/node",
+  "instances": 1,
+  "exec_mode": "fork",
+  "cwd": "/home/fireabyss/toonflow/test-app",
+  "env": {
+    "NODE_ENV": "prod",
+    "PORT": "10589"
+  }
+}
