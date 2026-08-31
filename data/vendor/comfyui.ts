@@ -135,8 +135,7 @@ const vendor: VendorConfig = {
   version: "2.0",
   author: "Mavis (本机 ComfyUI 适配 v2)",
   name: "本机 ComfyUI v2",
-  description:
-    "## 本机 ComfyUI 直连供应商 v2\n\n通过 ComfyUI 8188 HTTP API 调用本机已部署的 ComfyUI 出图/出视频。\n\n**29 个核心 model（全部端到端实测可跑）**\n\n### 图像（12 个）\n- **SDXL 文生图** - sd_xl_base_1.0（base+refiner）\n- **FLUX2 文生图** - flux2_dev_fp8mixed + mistral clip + small decoder VAE\n- **FLUX1-dev 文生图** - flux1-dev-fp8-e4m3fn + clip_l + t5xxl（2026-08-26 新增）\n- **FLUX2 + Turbo LoRA** - 4 步极速出图（Flux_2-Turbo-LoRA）\n- **Z-image Turbo** - z_image_turbo_bf16（8 步快速出图）\n- **简易自动出图** - DreamShaper 8（SD1.5，最快 8 步）\n- **自动出图工作流** - SDXL base（自动选 checkpoint）\n- **SD 放大** - Realistic Vision V5（image-to-image 放大）\n- **FaceDetailer 脸部增强** - SD1.5 + Detailer\n- **增强肖像模板** - SDXL + 肖像增强\n- **Hires fix 高清修复** - SDXL + Hires fix\n- **基础超分辨率** - SDXL + 4x-Ultrasharp\n\n### 视频（17 个）\n- **LTX-2B 旧版文生视频** - ltx-video-2b（轻量）\n- **LTX-2.3 满血 fp8 文生视频** - ltx-2.3-22b-dev-fp8（30 步高质量）\n- **LTX-2.3 nvfp4 图生视频** - ltx-2.3-22b-dev-nvfp4（i2v，8 步快速）\n- **LTX-2.3 首尾帧 v1** - ltxv-13b-0.9.8-distilled-fp8 + LTX 节点链\n- **LTX-2.3 首尾双图流满血** - ltx-2.3-22b-dev-fp8 + distilled lora\n- **LTX-2.3 视频修复** - 22B fp8 + SeedVR2\n- **MiniMax-H3 FL2VA 首帧图生视频** - minimax_h3_fl2va + 双 VAE（单图 → 视频+音频，2026-08-26 新增）\n- **MiniMax-H3 Ref2VA 图片参考** - minimax_h3_ref2va + 双 VAE（1 张 ref 图 → 视频，2026-08-26 新增）\n- **MiniMax-H3 T2VA 文生视频+音频** - 纯文字描述 → 视频+音频（2026-08-26 新增）\n- **MiniMax-H3 V2A 视频转音频** - 源视频 → 加音轨（2026-08-26 新增）\n\n**跑不通**（本机缺模型/节点）：FireRed-Edit/SCAIL/Qwen3-TTS/Qwen-2511\n\n**已删除**（8/13 主人指令）：1-WAN(partner API)、Wan 2.2 Animate NVFP4（生图/视频都不走）",
+  description: "## 本机 ComfyUI 直连供应商 v2\n\n通过 ComfyUI 8188 HTTP API 调用本机已部署的 ComfyUI 出图/出视频。\n\n**51 个核心 model（19 图像 + 28 视频 + 3 TTS + 1 文本占位；数量=模板 models 数组，勿写死）**\n\n> 2026-08-31: flux2 文本编码器全系已切换 fp8（mistral_3_small_flux2_fp8 18GB，替代 bf16 33GB），缓解 16GB 卡显存/内存瓶颈。\n\n### 图像（19 个）\n- **SDXL 文生图** - sdxl-t2i\n- **FLUX2 文生图** - flux2-t2i\n- **FLUX2 多图参考生分镜图** - flux2-t2i-multiref（2026-08-31 新增）\n- **FLUX1-dev 文生图** - flux1-t2i\n- **HiDream I1 文生图** - hidream-t2i\n- **Qwen-Image 文生图** - qwen-image-t2i\n- **Qwen-Image-Edit 图生图** - qwen-image-edit\n- **Z-image Turbo** - z-image-turbo\n- **Z-image 角色LoRA** - z-image-character\n- **简易自动出图** - simple-auto-img\n- **自动出图工作流** - auto-workflow-img\n- **SD 放大** - sd-upscale-img\n- **FaceDetailer 脸部增强** - face-detailer\n- **增强肖像模板** - portrait-enhance\n- **Hires fix 高清修复** - hires-fix\n- **基础超分辨率** - upscale-usdu\n- **SDXL 肖像 FaceID** - sdxl-portrait-faceid\n- **LTX-2.3 4K 放大** - ltx2.3-4k-upscale\n- **FLUX2 + Turbo LoRA** - flux2-turbo-lora\n\n### 视频（28 个）\n- **LTX-2B 旧版文生视频** - ltx-2b-t2v\n- **LTX-2.3 满血 fp8 文生视频** - ltx2.3-t2v-full\n- **LTX-2.3 nvfp4 图生视频** - ltx2.3-i2v-nvfp4\n- **MiniMax-H3 FL2VA 首帧图生视频** - h3-fl2va-first\n- **MiniMax-H3 Ref2VA 图片参考** - h3-ref2va-image\n- **MiniMax-H3 T2VA 文生视频+音频** - h3-t2va\n- **MiniMax-H3 V2A 视频转音频** - h3-v2a\n- **LTX-2.3 首尾帧 v1** - ltx2.3-startend\n- **LTX-2.3 首尾双图流满血** - ltx2.3-startend-full\n- **LTX-2.3 真首尾帧** - ltx2.3-truly-startend\n- **LTX-2.3 真首尾帧-软** - ltx2.3-truly-startend-soft\n- **LTX-2.3 真首尾帧-强** - ltx2.3-truly-startend-strong\n- **LTX-2.3 真首尾帧-非对称** - ltx2.3-truly-startend-asymmetric\n- **LTX-2.3 nvfp4 真首尾帧** - ltx2.3-nvfp4-startend\n- **LTX-2.3 fp8 真首尾帧** - ltx2.3-fp8-startend\n- **LTX-2.3 fp8 真首尾帧-8步** - ltx2.3-fp8-startend-8step\n- **LTX-2.3 视频修复** - ltx2.3-repair\n- **Hunyuan 文生视频** - hunyuan-t2v\n- **LTX-2.3 AV-LoRA talking-head** - ltx2.3-av-talking-head\n- **LTX-2.3 transition 转场** - ltx2.3-transition\n- **LTX-2.3 蒸馏快速** - ltx2.3-distilled-fast\n- **LTX-2.3 Licon 多图参考** - ltx2.3-licon-vbvr\n- **LTX-2.3 IC-Union control** - ltx2.3-ic-union-control\n- **LTX-2.3 IC-Union 6ref** - ltx2.3-ic-union-control-6ref\n- **LTX-2.3 4宫格1shot** - ltx2.3-4grid-1shot\n- **LTX-2.3 IC-Motion track** - ltx2.3-ic-motion-track\n- **SVD 图生视频** - svd-i2v\n- **LTX-2.3 SVD 段间过渡** - ltx2.3-svd-crossfade\n\n### TTS（3 个）\n- **F5-TTS** - f5-tts\n- **E2-TTS** - e2-tts\n- **ElevenLabs** - elevenlabs\n\n**跑不通**（本机缺模型/节点）：FireRed-Edit/SCAIL/Qwen3-TTS/Qwen-2511\n**已删除**（8/13 主人指令）：1-WAN(partner API)、Wan 2.2 Animate NVFP4（生图/视频都不走）",
   inputs: [
     { key: "baseUrl", label: "ComfyUI 服务地址", type: "url", required: true, placeholder: "http://127.0.0.1:8188" },
     { key: "apiKey", label: "ComfyUI API Key（可选，本机无 auth 留空）", type: "password", required: false, placeholder: "本机默认无认证，留空" },
@@ -406,6 +405,12 @@ const vendor: VendorConfig = {
       modelName: "flux2-t2i",
       type: "image",
       mode: ["text"],
+    },
+    {
+      name: "FLUX2 多图参考生分镜图 (最多6张资产参考图, Kontext offset 拼接)", 
+      modelName: "flux2-t2i-multiref",
+      type: "image",
+      mode: ["singleImage"],
     },
     {
       name: "FLUX1-dev 文生图 (fp8 + clip_l + t5xxl)",
@@ -888,6 +893,51 @@ function buildFlux2T2i(prompt: string, width: number, height: number, seed: numb
     "10": { class_type: "VAEDecode", inputs: { samples: ["9", 0], vae: ["3", 0] } },
     "11": { class_type: "SaveImage", inputs: { images: ["10", 0], filename_prefix: "toonflow_flux2" } },
   };
+}
+
+// ---- FLUX2 多图参考生分镜图 (2026-08-31 重建) ----
+// 基于 flux2 kontext 的 reference_latents 机制：多张资产参考图（角色/场景/道具）作为 conditioning 引导出图
+// 节点链: UNETLoader(flux2_dev_fp8mixed) + CLIPLoader(mistral_3_small_flux2_fp8) + VAELoader(full_encoder_small_decoder)
+//    + ModelSamplingFlux + CLIPTextEncode + FluxGuidance + 逐张 ReferenceLatent 串联 + FluxKontextMultiReferenceLatentMethod(offset) + KSampler + VAEDecode + SaveImage
+// 每个参考图: LoadImage → FluxKontextImageScale → VAEEncode → ReferenceLatent(conditioning, latent)
+// 多个 reference_latents 逐张串联 (前一个 conditioning 作为下一个输入), 最后用 FluxKontextMultiReferenceLatentMethod(reference_latents_method="offset") 合并
+// 显存: 与 flux2-t2i 相当 (fp8 文本编码器 + fp8mixed UNet), 16GB 卡可用
+function buildFlux2T2iMultiRef(prompt: string, width: number, height: number, seed: number, refNames: string[]): any {
+  const nodes: Record<string, any> = {
+    "1": { class_type: "UNETLoader", inputs: { unet_name: "flux2_dev_fp8mixed.safetensors", weight_dtype: "default" } },
+    "2": { class_type: "CLIPLoader", inputs: { clip_name: "mistral_3_small_flux2_fp8.safetensors", type: "flux2", device: "default" } },
+    "3": { class_type: "VAELoader", inputs: { vae_name: "full_encoder_small_decoder.safetensors" } },
+    "4": { class_type: "ModelSamplingFlux", inputs: { model: ["1", 0], max_shift: 1.15, base_shift: 0.5, width, height } },
+    "5": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: prompt } },
+    "6": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: NEGATIVE_DEFAULT } },
+    "7": { class_type: "FluxGuidance", inputs: { conditioning: ["5", 0], guidance: 3.5 } },
+    "8": { class_type: "EmptyLatentImage", inputs: { width, height, batch_size: 1 } },
+  };
+  // 逐张参考图 → ReferenceLatent 条件注入
+  let curCond = "7";
+  let nodeId = 20;
+  for (let i = 0; i < refNames.length; i++) {
+    const id = nodeId;
+    nodes[`${id}`] = { class_type: "LoadImage", inputs: { image: refNames[i] } };
+    nodes[`${id + 1}`] = { class_type: "FluxKontextImageScale", inputs: { image: [`${id}`, 0] } };
+    nodes[`${id + 2}`] = { class_type: "VAEEncode", inputs: { pixels: [`${id + 1}`, 0], vae: ["3", 0] } };
+    nodes[`${id + 3}`] = { class_type: "ReferenceLatent", inputs: { conditioning: [`${curCond}`, 0], latent: [`${id + 2}`, 0] } };
+    curCond = `${id + 3}`;
+    nodeId += 4;
+  }
+  // 多参考合并方法（offset 拼接）
+  const methodId = nodeId;
+  nodes[`${methodId}`] = { class_type: "FluxKontextMultiReferenceLatentMethod", inputs: { conditioning: [`${curCond}`, 0], reference_latents_method: "offset" } };
+  nodes["9"] = {
+    class_type: "KSampler",
+    inputs: {
+      model: ["4", 0], positive: [`${methodId}`, 0], negative: ["6", 0], latent_image: ["8", 0],
+      seed, steps: 20, cfg: 1, sampler_name: "euler", scheduler: "simple", denoise: 1.0,
+    },
+  };
+  nodes["10"] = { class_type: "VAEDecode", inputs: { samples: ["9", 0], vae: ["3", 0] } };
+  nodes["11"] = { class_type: "SaveImage", inputs: { images: ["10", 0], filename_prefix: "toonflow_flux2_multiref" } };
+  return nodes;
 }
 
 // ---- FLUX1-dev (2026-08-26 新增) ----
@@ -2467,6 +2517,21 @@ const imageRequest = async (config: ImageConfig, model: ImageModel): Promise<str
         break;
       case "flux2-t2i":
         wf = buildFlux2T2i(config.prompt, w, h, seed);
+        break;
+      case "flux2-t2i-multiref":
+        // FLUX2 多图参考生分镜图：需要 1-6 张参考图，逐张上传到 ComfyUI input 目录
+        {
+          const refs = config.referenceList || [];
+          if (refs.length === 0) throw new Error("flux2-t2i-multiref 需要 reference 图片 (1-6 张)");
+          if (refs.length > 6) throw new Error("flux2-t2i-multiref 最多 6 张参考图");
+          const refNames: string[] = [];
+          for (let i = 0; i < refs.length; i++) {
+            const upName = await comfyUploadImage(refs[i].base64, `multiref_${Date.now()}_${i}.png`);
+            refNames.push(upName);
+          }
+          logger(`multiref uploaded: ${refNames.join(",")}`);
+          wf = buildFlux2T2iMultiRef(config.prompt, w, h, seed, refNames);
+        }
         break;
       case "flux1-t2i":
         wf = buildFlux1T2i(config.prompt, w, h, seed);
