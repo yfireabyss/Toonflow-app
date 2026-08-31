@@ -2,7 +2,6 @@ import express from "express";
 import u from "@/utils";
 import { z } from "zod";
 import sharp from "sharp";
-import pLimit from "p-limit";
 import { error, success } from "@/lib/responseFormat";
 import { validateFields } from "@/middleware/middleware";
 import { Output, tool } from "ai";
@@ -24,7 +23,7 @@ export default router.post(
       storyboardIds,
       projectId,
       scriptId,
-      concurrentCount = 2,
+      concurrentCount = 5,
       compulsory = false,
     }: {
       storyboardIds: number[];
@@ -127,21 +126,16 @@ export default router.post(
           });
       }
     };
-    // 2026-08-31: 采用 p-limit 并发池, 保证同时最多 safeLimit 个任务在跑, 有任务结束才提交下一个.
-    // 防止一次性几十个分镜图请求同时打到 ComfyUI, 把本机 16GB 显存干崩.
-    // 16GB 卡安全值: flux2-multiref 单任务(含多张参考图 VAE encode)峰值 ~8GB, 并发 2 个 ~16GB 仍偏紧,
-    // 故默认并限定上限为 2(用户 2026-08-31 确认), 即使前端/客户端传 100 也不准超过.
+    // 并发控制: 由 utils/ai.ts 的全局 comfyMediaLimit(2) 统一兜底(跨项目/跨图像视频全局共享),
+    // 此处无需再局部限流, 直接按 storyboardData 提交即可(全局信号量会在真正调 vendor 前排队).
     let generateList = [];
     if (compulsory) {
       generateList = storyboardData;
     } else {
       generateList = storyboardData.filter((item) => item.shouldGenerateImage !== 0);
     }
-    // 硬性兜底: 并发数恒不超过 2(即使调用方传入更大的值), 防止前端 bug/恶意请求或 AI 自动批量提交打满显存
-    const safeLimit = Math.max(1, Math.min(concurrentCount, 2));
-    const limit = pLimit(safeLimit);
-    // 后台执行, 不阻塞响应
-    void Promise.all(generateList.map((item) => limit(() => generateTask(item))));
+    // 后台异步执行, 不阻塞响应; 并发上限由 ai.ts 全局信号量保证 ≤2
+    void Promise.all(generateList.map((item) => generateTask(item)));
   },
 );
 async function getAssetsImageBase64(imageIds: number[]) {

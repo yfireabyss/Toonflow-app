@@ -2,7 +2,15 @@ import { generateText, streamText, wrapLanguageModel, stepCountIs, extractReason
 import { devToolsMiddleware } from "@ai-sdk/devtools";
 import axios from "axios";
 import { transform } from "sucrase";
+import pLimit from "p-limit";
 import u from "@/utils";
+
+// 2026-08-31: 全局并发信号量, 仅对 comfyui 供应商的图像/视频生成限流.
+// 所有项目(即使同时跑多个 test 项目)、所有链路(分镜图/图生视频/文生视频)共享同一个信号量,
+// 保证同时打到 ComfyUI 的任务总数恒 ≤2, 防止多个项目叠加把本机 16GB 显存干崩.
+// 16GB 卡经验值: flux2-multiref/图生视频单任务峰值 ~8GB, 并发 2 ≈ 16GB 边界.
+const COMFY_MEDIA_CONCURRENCY = 2;
+const comfyMediaLimit = pLimit(COMFY_MEDIA_CONCURRENCY);
 
 type AiType =
   | "scriptAgent"
@@ -254,7 +262,13 @@ class AiImage {
     const exec = async (mn: `${string}:${string}`) => {
       const fn = await getVendorTemplateFn("imageRequest", mn);
       await referenceList2imageBase642(mn.split(/:(.+)/)[0], input);
-      this.result = await fn(input);
+      // comfyui 供应商走全局信号量限制并发; 其他厂商不限
+      const vendorId = mn.split(/:(.+)/)[0];
+      const doRun = () => fn(input);
+      this.result =
+        vendorId === "comfyui"
+          ? await comfyMediaLimit(doRun)
+          : await doRun();
       if (this.result.startsWith("http")) this.result = await urlToBase64(this.result);
       return this;
     };
@@ -302,7 +316,13 @@ class AiVideo {
         const fn = await getVendorTemplateFn("videoRequest", mn);
         await referenceList2imageBase642(mn.split(/:(.+)/)[0], input);
 
-        this.result = await fn(input);
+        // comfyui 供应商走全局信号量限制并发; 其他厂商不限
+        const vendorId = mn.split(/:(.+)/)[0];
+        const doRun = () => fn(input);
+        this.result =
+          vendorId === "comfyui"
+            ? await comfyMediaLimit(doRun)
+            : await doRun();
 
         if (this.result.startsWith("http")) this.result = await urlToBase64(this.result);
       };
