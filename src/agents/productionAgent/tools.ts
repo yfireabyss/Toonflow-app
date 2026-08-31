@@ -424,6 +424,39 @@ export default (toolCpnfig: ToolConfig) => {
           }
           const resp = await axios.post(baseUrl, { data: [pageData], scriptId, projectId }, { headers, timeout: 15000 });
           const insertedId = resp?.data?.data?.[0]?.id;
+          // 分镜面板前端读的是 o_agentWorkData.productionAgent.storyboard[] JSON,
+          // 不是 o_storyboard 表。落表后同步写 JSON, 模拟前端 socket 接收 addStoryboard 时
+          // push 到本地 storyboard 再 setFlowData() 保存的效果, 否则面板仍显示为空。
+          if (insertedId) {
+            const wbRow: any = await u
+              .db("o_agentWorkData")
+              .where("projectId", String(projectId))
+              .andWhere("episodesId", String(scriptId))
+              .andWhere("key", "productionAgent")
+              .first();
+            let wbData: any = {};
+            if (wbRow && wbRow.data) {
+              try { wbData = JSON.parse(wbRow.data); } catch {}
+            }
+            const sbList = Array.isArray(wbData.storyboard) ? wbData.storyboard : [];
+            sbList.push({
+              id: insertedId,
+              duration: pageData.duration,
+              prompt: pageData.prompt,
+              associateAssetsIds: pageData.associateAssetsIds,
+              src: null,
+              state: pageData.state,
+              videoDesc: pageData.videoDesc,
+              shouldGenerateImage: pageData.shouldGenerateImage,
+              track: pageData.track,
+            });
+            wbData.storyboard = sbList;
+            if (wbRow) {
+              await u.db("o_agentWorkData").where({ id: wbRow.id }).update({ data: JSON.stringify(wbData) });
+            } else {
+              await u.db("o_agentWorkData").insert({ projectId, episodesId: scriptId, key: "productionAgent", data: JSON.stringify(wbData) });
+            }
+          }
           thinking.appendText("新增的分镜数据:\n" + JSON.stringify(pageData, null, 2) + `\n分镜ID: ${insertedId ?? "?"}`);
           thinking.updateTitle(`新增分镜成功(ID ${insertedId ?? "?"})`);
           thinking.complete();
