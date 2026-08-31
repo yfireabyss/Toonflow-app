@@ -416,8 +416,11 @@ export default (toolCpnfig: ToolConfig) => {
           const baseUrl = `http://127.0.0.1:${port}/api/production/storyboard/batchAddStoryboardInfo`;
           const headers: Record<string, string> = {};
           if (authToken) {
+            // socket.handshake.auth.token 可能已带 "Bearer " 前缀(login 返回如此),
+            // 先剥掉再拼, 避免出现 "Bearer Bearer xxx" 导致 jwt.verify 失败(401)
+            const bare = String(authToken).replace(/^Bearer\s+/i, "");
             const hKey = "authorization";
-            headers[hKey] = `Bearer ${authToken}`;
+            headers[hKey] = `Bearer ${bare}`;
           }
           const resp = await axios.post(baseUrl, { data: [pageData], scriptId, projectId }, { headers, timeout: 15000 });
           const insertedId = resp?.data?.data?.[0]?.id;
