@@ -2520,9 +2520,14 @@ const imageRequest = async (config: ImageConfig, model: ImageModel): Promise<str
         break;
       case "flux2-t2i-multiref":
         // FLUX2 多图参考生分镜图：需要 1-6 张参考图，逐张上传到 ComfyUI input 目录
+        // 无参考图时自动降级为纯文生图（buildFlux2T2i），避免分镜图生成时因缺资产图而报错
         {
           const refs = config.referenceList || [];
-          if (refs.length === 0) throw new Error("flux2-t2i-multiref 需要 reference 图片 (1-6 张)");
+          if (refs.length === 0) {
+            logger("flux2-t2i-multiref 无 reference 图片, 降级为 flux2-t2i 纯文生图");
+            wf = buildFlux2T2i(config.prompt, w, h, seed);
+            break;
+          }
           if (refs.length > 6) throw new Error("flux2-t2i-multiref 最多 6 张参考图");
           const refNames: string[] = [];
           for (let i = 0; i < refs.length; i++) {
