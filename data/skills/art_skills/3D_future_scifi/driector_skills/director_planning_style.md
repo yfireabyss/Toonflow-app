@@ -1,3 +1,8 @@
+---
+name: director_planning_style
+description: 导演规划约束 · 未来科幻风格 — 定义3D未来科幻在美术主导决策、世界观基调、立项约束、科技逻辑与场景/人物/道具设定上的全局约束。适用于任何以未来科幻为叙事类型的项目。
+metaData: director_skills
+---
 # 导演规划 · 未来科幻风格
 
 ## 一、世界观基调
