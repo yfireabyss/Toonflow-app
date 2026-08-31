@@ -1,6 +1,7 @@
 import { tool, jsonSchema, Tool } from "ai";
 import { z } from "zod";
 import _ from "lodash";
+import axios from "axios";
 import ResTool from "@/socket/resTool";
 import u from "@/utils";
 
@@ -389,34 +390,48 @@ export default (toolCpnfig: ToolConfig) => {
       ),
       execute: async (raw) => {
         const thinking = msg.thinking("正在新增 分镜面板 数据...");
-        const data = {
-          videoDesc: raw.videoDesc,
-          prompt: raw.prompt,
+        const { projectId, scriptId } = resTool.data;
+        if (!projectId || !scriptId) {
+          thinking.appendText("缺少 projectId 或 scriptId，无法新增分镜");
+          thinking.updateTitle("新增分镜失败(缺少上下文)");
+          thinking.complete();
+          return "新增分镜失败: 缺少 projectId 或 scriptId";
+        }
+        // 为避免依赖前端 socket 在线接收 addStoryboard 广播(导致永不落库),
+        // 改为执行层直接走 HTTP API: POST /api/production/storyboard/batchAddStoryboardInfo
+        // 该接口同时落 o_storyboard + 写 o_assets2Storyboard 资产关联 + 按 track 分配 trackId
+        const pageData = {
+          prompt: raw.prompt ?? "",
+          duration: raw.duration ?? 5,
           track: raw.track,
-          duration: raw.duration,
+          state: "待生成",
+          src: null as string | null,
+          videoDesc: raw.videoDesc,
+          shouldGenerateImage: raw.shouldGenerateImage === "true" ? 1 : 0,
           associateAssetsIds: raw.associateAssetsIds ?? [],
-          shouldGenerateImage: raw.shouldGenerateImage,
         };
-        socketQueue(
-          () =>
-            new Promise((resolve, reject) =>
-              socket.emit("addStoryboard", { ...data }, (res: any) => {
-                if (res?.error) return reject(new Error(res.error));
-                resolve(res);
-              }),
-            ),
-        )
-          .then((res) => {
-            thinking.appendText("新增的分镜数据:\n" + JSON.stringify(data, null, 2));
-            thinking.updateTitle("新增分镜成功");
-            thinking.complete();
-          })
-          .catch((e) => {
-            thinking.appendText("新增的分镜数据:\n" + JSON.stringify(data, null, 2));
-            thinking.updateTitle("新增分镜失败");
-            thinking.complete();
-          });
-        return true;
+        try {
+          const authToken = (resTool.socket?.handshake?.auth || {})["token"] as string | undefined;
+          const port = Number(process.env.PORT) || 10588;
+          const baseUrl = `http://127.0.0.1:${port}/api/production/storyboard/batchAddStoryboardInfo`;
+          const headers: Record<string, string> = {};
+          if (authToken) {
+            const hKey = "authorization";
+            headers[hKey] = `Bearer ${authToken}`;
+          }
+          const resp = await axios.post(baseUrl, { data: [pageData], scriptId, projectId }, { headers, timeout: 15000 });
+          const insertedId = resp?.data?.data?.[0]?.id;
+          thinking.appendText("新增的分镜数据:\n" + JSON.stringify(pageData, null, 2) + `\n分镜ID: ${insertedId ?? "?"}`);
+          thinking.updateTitle(`新增分镜成功(ID ${insertedId ?? "?"})`);
+          thinking.complete();
+          return { success: true, id: insertedId };
+        } catch (e: any) {
+          const errMsg = e?.response?.data?.message || e?.message || "新增分镜失败";
+          thinking.appendText("新增的分镜数据:\n" + JSON.stringify(pageData, null, 2) + `\n错误: ${errMsg}`);
+          thinking.updateTitle("新增分镜失败");
+          thinking.complete();
+          return `新增分镜失败: ${errMsg}`;
+        }
       },
     }),
   };
