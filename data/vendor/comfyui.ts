@@ -628,8 +628,17 @@ const vendor: VendorConfig = {
 
 function getHeaders(): Record<string, string> {
   const h: Record<string, string> = { "Content-Type": "application/json" };
-  if (vendor.inputValues.apiKey) h["Authorization"] = `Bearer ${vendor.inputValues.apiKey}`;
+  const auth = getAuthHeader();
+  if (auth) h["Authorization"] = auth;
   return h;
+}
+
+// 2026-08-31: 抽公共 Auth 头生成 — apiKey 含 ":" 时走 Basic Auth, 否则 Bearer
+function getAuthHeader(): string | null {
+  const ak = vendor.inputValues.apiKey;
+  if (!ak) return null;
+  if (ak.includes(":")) return `Basic ${Buffer.from(ak).toString("base64")}`;
+  return `Bearer ${ak}`;
 }
 
 function getBaseUrl(): string {
@@ -718,7 +727,8 @@ async function comfyUploadImage(base64: string, filename: string = "ref.png"): P
   form.append("type", "input");
   form.append("overwrite", "true");
   const resp = await axios.post(`${getBaseUrl()}/upload/image`, form, {
-    headers: { ...form.getHeaders?.(), ...(vendor.inputValues.apiKey ? { Authorization: `Bearer ${vendor.inputValues.apiKey}` } : {}) },
+    // 2026-08-31: 用 getAuthHeader() 替代硬编码 Bearer, 兼容 apiKey="user:pass" 的 Basic Auth 模式
+    headers: { ...form.getHeaders?.(), ...(getAuthHeader() ? { Authorization: getAuthHeader() } : {}) },
     timeout: 60_000,
   });
   return resp.data.name;
@@ -734,7 +744,8 @@ async function comfyUploadAudio(base64: string, filename: string = "ref.wav"): P
   form.append("type", "input");
   form.append("overwrite", "true");
   const resp = await axios.post(`${getBaseUrl()}/upload/image`, form, {
-    headers: { ...form.getHeaders?.(), ...(vendor.inputValues.apiKey ? { Authorization: `Bearer ${vendor.inputValues.apiKey}` } : {}) },
+    // 2026-08-31: 用 getAuthHeader() 替代硬编码 Bearer, 兼容 apiKey="user:pass" 的 Basic Auth 模式
+    headers: { ...form.getHeaders?.(), ...(getAuthHeader() ? { Authorization: getAuthHeader() } : {}) },
     timeout: 60_000,
   });
   return resp.data.name;
