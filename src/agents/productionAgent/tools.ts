@@ -344,27 +344,49 @@ export default (toolCpnfig: ToolConfig) => {
       ),
       execute: async ({ ids }) => {
         const thinking = msg.thinking("正在生成分镜...");
-        socketQueue(
-          () =>
-            new Promise((resolve, reject) =>
-              socket.emit("generateStoryboard", { ids }, (res: any) => {
-                if (res?.error) return reject(new Error(res.error));
-                resolve(res);
-              }),
-            ),
-        )
-          .then((res) => {
-            thinking.appendText("生成的分镜数据:\n" + JSON.stringify(res, null, 2));
-            thinking.updateTitle("分镜生成完成");
-            thinking.complete();
-          })
-          .catch((e) => {
-            thinking.appendText("分镜生成失败:\n" + u.error(e).message);
-            thinking.updateTitle("分镜生成失败");
-            thinking.complete();
-          });
-
-        return "开始生成分镜";
+        const { projectId, scriptId } = resTool.data;
+        if (!projectId || !scriptId) {
+          thinking.appendText("缺少 projectId 或 scriptId，无法生成分镜图");
+          thinking.updateTitle("分镜生成失败(缺少上下文)");
+          thinking.complete();
+          return "分镜生成失败: 缺少 projectId 或 scriptId";
+        }
+        if (!ids || !ids.length) {
+          thinking.appendText("ids 为空，无法生成分镜图");
+          thinking.updateTitle("分镜生成失败(ids为空)");
+          thinking.complete();
+          return "分镜生成失败: ids 为空";
+        }
+        // 2026-08-31: 改为后端直接 HTTP 调 /api/production/storyboard/batchGenerateImage,
+        // 彻底绕开 socket 依赖前端在线接收 generateStoryboard 事件(否则事件被丢弃,
+        // 前端 m(ids) 不执行, 分镜图任务根本不提交到 ComfyUI, 而工具却已返回"已发送").
+        // 提交的分镜图任务会走 AiImage.run 的全局信号量(≤2 并发), 保护 16GB 显存.
+        try {
+          const authToken = (resTool.socket?.handshake?.auth || {})["token"] as string | undefined;
+          const port = Number(process.env.PORT) || 10588;
+          const baseUrl = `http://127.0.0.1:${port}/api/production/storyboard/batchGenerateImage`;
+          const headers: Record<string, string> = {};
+          if (authToken) {
+            const bare = String(authToken).replace(/^Bearer\s+/i, "");
+            headers["authorization"] = `Bearer ${bare}`;
+          }
+          const resp = await axios.post(
+            baseUrl,
+            { projectId, scriptId, storyboardIds: ids, concurrentCount: 2, compulsory: false },
+            { headers, timeout: 30000 },
+          );
+          const submitted = resp?.data?.data?.length ?? ids.length;
+          thinking.appendText(`已提交分镜图生成任务, ids=${ids.length} 个, 返回 ${submitted} 条`);
+          thinking.updateTitle(`分镜生成已提交(${ids.length} 个)`);
+          thinking.complete();
+          return `分镜图生成任务已提交: ${ids.length} 个分镜`;
+        } catch (e: any) {
+          const errMsg = e?.response?.data?.message || e?.message || "分镜生成提交失败";
+          thinking.appendText(`分镜生成提交失败:\n${errMsg}`);
+          thinking.updateTitle("分镜生成提交失败");
+          thinking.complete();
+          return `分镜生成提交失败: ${errMsg}`;
+        }
       },
     }),
     add_flowData_storyboard: tool({

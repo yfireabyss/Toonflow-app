@@ -114,6 +114,7 @@ interface HistoryEntry {
 // ============================================================
 
 declare const axios: any;
+declare const axiosDirect: any;
 declare const logger: (msg: string) => void;
 declare const pollTask: (fn: () => Promise<PollResult>, interval?: number, timeout?: number) => Promise<PollResult>;
 declare const urlToBase64: (url: string) => Promise<string>;
@@ -694,7 +695,7 @@ function lengthFromDuration(durationSec: number, fps: number = 24): number {
 }
 
 async function comfyPost(path: string, body: any, timeoutMs = 30_000): Promise<any> {
-  const resp = await axios.post(`${getBaseUrl()}${path}`, body, {
+  const resp = await axiosDirect.post(`${getBaseUrl()}${path}`, body, {
     headers: getHeaders(),
     timeout: timeoutMs,
   });
@@ -702,7 +703,7 @@ async function comfyPost(path: string, body: any, timeoutMs = 30_000): Promise<a
 }
 
 async function comfyGet(path: string, timeoutMs = 30_000): Promise<any> {
-  const resp = await axios.get(`${getBaseUrl()}${path}`, {
+  const resp = await axiosDirect.get(`${getBaseUrl()}${path}`, {
     headers: getHeaders(),
     timeout: timeoutMs,
   });
@@ -710,7 +711,7 @@ async function comfyGet(path: string, timeoutMs = 30_000): Promise<any> {
 }
 
 async function comfyDownloadView(filename: string, subfolder: string, type: string): Promise<Buffer> {
-  const resp = await axios.get(`${getBaseUrl()}/view`, {
+  const resp = await axiosDirect.get(`${getBaseUrl()}/view`, {
     params: { filename, subfolder, type },
     headers: getHeaders(),
     responseType: "arraybuffer",
@@ -726,7 +727,7 @@ async function comfyUploadImage(base64: string, filename: string = "ref.png"): P
   form.append("image", buffer, { filename, contentType: "image/png" });
   form.append("type", "input");
   form.append("overwrite", "true");
-  const resp = await axios.post(`${getBaseUrl()}/upload/image`, form, {
+  const resp = await axiosDirect.post(`${getBaseUrl()}/upload/image`, form, {
     // 2026-08-31: 用 getAuthHeader() 替代硬编码 Bearer, 兼容 apiKey="user:pass" 的 Basic Auth 模式
     headers: { ...form.getHeaders?.(), ...(getAuthHeader() ? { Authorization: getAuthHeader() } : {}) },
     timeout: 60_000,
@@ -743,7 +744,7 @@ async function comfyUploadAudio(base64: string, filename: string = "ref.wav"): P
   form.append("image", buffer, { filename, contentType: "audio/wav" });
   form.append("type", "input");
   form.append("overwrite", "true");
-  const resp = await axios.post(`${getBaseUrl()}/upload/image`, form, {
+  const resp = await axiosDirect.post(`${getBaseUrl()}/upload/image`, form, {
     // 2026-08-31: 用 getAuthHeader() 替代硬编码 Bearer, 兼容 apiKey="user:pass" 的 Basic Auth 模式
     headers: { ...form.getHeaders?.(), ...(getAuthHeader() ? { Authorization: getAuthHeader() } : {}) },
     timeout: 60_000,
