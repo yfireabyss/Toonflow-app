@@ -1,3 +1,8 @@
+---
+name: director_storyboard
+description: 导演分镜提示词技法 · 未来科幻风格（3D_future_scifi）— 定义未来科幻风格在分镜提示词上的视觉基准、镜头语言、场景/人物/道具的一致性要求与构图画质规范。
+metaData: director_skills
+---
 # 导演分镜 · 未来科幻风格
 
 ## 一、分镜原则

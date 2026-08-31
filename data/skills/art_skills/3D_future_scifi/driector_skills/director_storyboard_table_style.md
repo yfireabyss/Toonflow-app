@@ -1,3 +1,8 @@
+---
+name: director_storyboard_table_style
+description: 分镜表未来科幻风格约束 — 定义3D未来科幻在分镜表中的色彩氛围规范、运镜禁忌、转场禁忌与视觉一致性约束。适用于任何叙事类型。
+metaData: director_skills
+---
 # 分镜表格 · 未来科幻风格
 
 ## 字段对齐
