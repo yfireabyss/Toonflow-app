@@ -42,8 +42,8 @@ export default (nsp: Namespace) => {
     let abortController: AbortController | null = null;
 
     const thinkConfig: agent.AgentContext["thinkConfig"] = {
-      think: false,
-      thinlLevel: 0,
+      think: true,
+      thinlLevel: 2,
     };
 
     socket.on("updateContext", (data: { isolationKey: string; projectId: number; scriptId: number }, callback) => {
