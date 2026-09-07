@@ -1016,18 +1016,20 @@ function buildFlux1T2i(prompt: string, width: number, height: number, seed: numb
 function buildFlux1T2iMultiRefIPA(prompt: string, width: number, height: number, seed: number, refNames: string[]): any {
   const cleanedPrompt = cleanPrompt(prompt);
   const nodes: Record<string, any> = {
-    "1": { class_type: "UNETLoader", inputs: { unet_name: "flux\\flux1-dev-fp8-e4m3fn.safetensors", weight_dtype: "default" } },
+    // flux1-dev-fp8 是 FP8 UNet 单文件(不含clip/vae), 在 checkpoints 目录(CheckpointLoaderSimple 用).
+    // MODEL 取 [0]; CLIP 需独立 DualCLIPLoader(clip_l+t5xxl); VAE 需独立 VAELoader(ae).
+    "1": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "flux\\flux1-dev-fp8-e4m3fn.safetensors" } },
     "2": { class_type: "DualCLIPLoader", inputs: { clip_name1: "clip_l.safetensors", clip_name2: "t5xxl_fp16.safetensors", type: "flux", device: "default" } },
     "3": { class_type: "VAELoader", inputs: { vae_name: "ae.safetensors" } },
-    "4": { class_type: "ModelSamplingFlux", inputs: { model: ["1", 0], max_shift: 1.15, base_shift: 0.5, width, height } },
-    "5": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: cleanedPrompt } },
-    "6": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: NEGATIVE_DEFAULT } },
-    "7": { class_type: "FluxGuidance", inputs: { conditioning: ["5", 0], guidance: 3.5 } },
+    "4": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: cleanedPrompt } },
+    "5": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: NEGATIVE_DEFAULT } },
+    "6": { class_type: "ModelSamplingFlux", inputs: { model: ["1", 0], max_shift: 1.15, base_shift: 0.5, width, height } },
+    "7": { class_type: "FluxGuidance", inputs: { conditioning: ["4", 0], guidance: 3.5 } },
     "8": { class_type: "IPAdapterFluxLoader", inputs: { ipadapter: "xlab_flux_ip_adapter_v1.safetensors", clip_vision: "google/siglip-so400m-patch14-384", provider: "cuda" } },
     "9": { class_type: "EmptyLatentImage", inputs: { width, height, batch_size: 1 } },
   };
   // 多张参考图: 逐张 ApplyIPAdapterFlux 串联 (每次接上一级 model + 一张新 ref image)
-  let curModel = "4";
+  let curModel = "6";
   let nodeId = 20;
   for (let i = 0; i < refNames.length; i++) {
     const id = nodeId;
@@ -1039,7 +1041,7 @@ function buildFlux1T2iMultiRefIPA(prompt: string, width: number, height: number,
   nodes["40"] = {
     class_type: "KSampler",
     inputs: {
-      model: [curModel, 0], positive: ["7", 0], negative: ["6", 0], latent_image: ["9", 0],
+      model: [curModel, 0], positive: ["7", 0], negative: ["5", 0], latent_image: ["9", 0],
       seed, steps: 20, cfg: 3.5, sampler_name: "euler", scheduler: "simple", denoise: 1.0,
     },
   };
