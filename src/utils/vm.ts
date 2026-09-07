@@ -36,6 +36,9 @@ export default function runCode(code: string, vendor?: Record<string, any>) {
     fetch: fetch,
     exports,
     axios,
+    // 2026-08-31: 内网直连用 axios 实例(proxy:false), 供 ComfyUI 这类局域网 vendor 直连,
+    // 不走进程注入的 http_proxy(否则 DSH 白名单会拦截 192.168 POST 返回 403, 导致 ComfyUI 收不到任务).
+    axiosDirect: axios.create({ proxy: false }),
     FormData,
     logger,
     jsonwebtoken,

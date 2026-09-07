@@ -1,6 +1,7 @@
 import { tool, jsonSchema, Tool } from "ai";
 import { z } from "zod";
 import _ from "lodash";
+import axios from "axios";
 import ResTool from "@/socket/resTool";
 import u from "@/utils";
 
@@ -343,27 +344,49 @@ export default (toolCpnfig: ToolConfig) => {
       ),
       execute: async ({ ids }) => {
         const thinking = msg.thinking("正在生成分镜...");
-        socketQueue(
-          () =>
-            new Promise((resolve, reject) =>
-              socket.emit("generateStoryboard", { ids }, (res: any) => {
-                if (res?.error) return reject(new Error(res.error));
-                resolve(res);
-              }),
-            ),
-        )
-          .then((res) => {
-            thinking.appendText("生成的分镜数据:\n" + JSON.stringify(res, null, 2));
-            thinking.updateTitle("分镜生成完成");
-            thinking.complete();
-          })
-          .catch((e) => {
-            thinking.appendText("分镜生成失败:\n" + u.error(e).message);
-            thinking.updateTitle("分镜生成失败");
-            thinking.complete();
-          });
-
-        return "开始生成分镜";
+        const { projectId, scriptId } = resTool.data;
+        if (!projectId || !scriptId) {
+          thinking.appendText("缺少 projectId 或 scriptId，无法生成分镜图");
+          thinking.updateTitle("分镜生成失败(缺少上下文)");
+          thinking.complete();
+          return "分镜生成失败: 缺少 projectId 或 scriptId";
+        }
+        if (!ids || !ids.length) {
+          thinking.appendText("ids 为空，无法生成分镜图");
+          thinking.updateTitle("分镜生成失败(ids为空)");
+          thinking.complete();
+          return "分镜生成失败: ids 为空";
+        }
+        // 2026-08-31: 改为后端直接 HTTP 调 /api/production/storyboard/batchGenerateImage,
+        // 彻底绕开 socket 依赖前端在线接收 generateStoryboard 事件(否则事件被丢弃,
+        // 前端 m(ids) 不执行, 分镜图任务根本不提交到 ComfyUI, 而工具却已返回"已发送").
+        // 提交的分镜图任务会走 AiImage.run 的全局信号量(≤2 并发), 保护 16GB 显存.
+        try {
+          const authToken = (resTool.socket?.handshake?.auth || {})["token"] as string | undefined;
+          const port = Number(process.env.PORT) || 10588;
+          const baseUrl = `http://127.0.0.1:${port}/api/production/storyboard/batchGenerateImage`;
+          const headers: Record<string, string> = {};
+          if (authToken) {
+            const bare = String(authToken).replace(/^Bearer\s+/i, "");
+            headers["authorization"] = `Bearer ${bare}`;
+          }
+          const resp = await axios.post(
+            baseUrl,
+            { projectId, scriptId, storyboardIds: ids, concurrentCount: 2, compulsory: false },
+            { headers, timeout: 30000 },
+          );
+          const submitted = resp?.data?.data?.length ?? ids.length;
+          thinking.appendText(`已提交分镜图生成任务, ids=${ids.length} 个, 返回 ${submitted} 条`);
+          thinking.updateTitle(`分镜生成已提交(${ids.length} 个)`);
+          thinking.complete();
+          return `分镜图生成任务已提交: ${ids.length} 个分镜`;
+        } catch (e: any) {
+          const errMsg = e?.response?.data?.message || e?.message || "分镜生成提交失败";
+          thinking.appendText(`分镜生成提交失败:\n${errMsg}`);
+          thinking.updateTitle("分镜生成提交失败");
+          thinking.complete();
+          return `分镜生成提交失败: ${errMsg}`;
+        }
       },
     }),
     add_flowData_storyboard: tool({
@@ -389,34 +412,87 @@ export default (toolCpnfig: ToolConfig) => {
       ),
       execute: async (raw) => {
         const thinking = msg.thinking("正在新增 分镜面板 数据...");
-        const data = {
-          videoDesc: raw.videoDesc,
-          prompt: raw.prompt,
+        const { projectId, scriptId } = resTool.data;
+        if (!projectId || !scriptId) {
+          thinking.appendText("缺少 projectId 或 scriptId，无法新增分镜");
+          thinking.updateTitle("新增分镜失败(缺少上下文)");
+          thinking.complete();
+          return "新增分镜失败: 缺少 projectId 或 scriptId";
+        }
+        // 为避免依赖前端 socket 在线接收 addStoryboard 广播(导致永不落库),
+        // 改为执行层直接走 HTTP API: POST /api/production/storyboard/batchAddStoryboardInfo
+        // 该接口同时落 o_storyboard + 写 o_assets2Storyboard 资产关联 + 按 track 分配 trackId
+        const pageData = {
+          prompt: raw.prompt ?? "",
+          duration: raw.duration ?? 5,
           track: raw.track,
-          duration: raw.duration,
+          state: "待生成",
+          src: null as string | null,
+          videoDesc: raw.videoDesc,
+          shouldGenerateImage: raw.shouldGenerateImage === "true" ? 1 : 0,
           associateAssetsIds: raw.associateAssetsIds ?? [],
-          shouldGenerateImage: raw.shouldGenerateImage,
         };
-        socketQueue(
-          () =>
-            new Promise((resolve, reject) =>
-              socket.emit("addStoryboard", { ...data }, (res: any) => {
-                if (res?.error) return reject(new Error(res.error));
-                resolve(res);
-              }),
-            ),
-        )
-          .then((res) => {
-            thinking.appendText("新增的分镜数据:\n" + JSON.stringify(data, null, 2));
-            thinking.updateTitle("新增分镜成功");
-            thinking.complete();
-          })
-          .catch((e) => {
-            thinking.appendText("新增的分镜数据:\n" + JSON.stringify(data, null, 2));
-            thinking.updateTitle("新增分镜失败");
-            thinking.complete();
-          });
-        return true;
+        try {
+          const authToken = (resTool.socket?.handshake?.auth || {})["token"] as string | undefined;
+          const port = Number(process.env.PORT) || 10588;
+          const baseUrl = `http://127.0.0.1:${port}/api/production/storyboard/batchAddStoryboardInfo`;
+          const headers: Record<string, string> = {};
+          if (authToken) {
+            // socket.handshake.auth.token 可能已带 "Bearer " 前缀(login 返回如此),
+            // 先剥掉再拼, 避免出现 "Bearer Bearer xxx" 导致 jwt.verify 失败(401)
+            const bare = String(authToken).replace(/^Bearer\s+/i, "");
+            const hKey = "authorization";
+            headers[hKey] = `Bearer ${bare}`;
+          }
+          const resp = await axios.post(baseUrl, { data: [pageData], scriptId, projectId }, { headers, timeout: 15000 });
+          // 2026-08-31: 取 batchAddStoryboardInfo 新增的 insertedIds[0] 才是本次插入的真实自增 id.
+          // 之前取 data.data[0].id 永远拿到脚本首条 (id=1), 导致 o_agentWorkData.storyboard[] JSON
+          // 里所有条目 id 被推为 1, 引发分镜面板 id 唯一性故障.
+          const insertedId = resp?.data?.data?.insertedIds?.[0];
+          // 分镜面板前端读的是 o_agentWorkData.productionAgent.storyboard[] JSON,
+          // 不是 o_storyboard 表。落表后同步写 JSON, 模拟前端 socket 接收 addStoryboard 时
+          // push 到本地 storyboard 再 setFlowData() 保存的效果, 否则面板仍显示为空。
+          if (insertedId) {
+            const wbRow: any = await u
+              .db("o_agentWorkData")
+              .where("projectId", String(projectId))
+              .andWhere("episodesId", String(scriptId))
+              .andWhere("key", "productionAgent")
+              .first();
+            let wbData: any = {};
+            if (wbRow && wbRow.data) {
+              try { wbData = JSON.parse(wbRow.data); } catch {}
+            }
+            const sbList = Array.isArray(wbData.storyboard) ? wbData.storyboard : [];
+            sbList.push({
+              id: insertedId,
+              duration: pageData.duration,
+              prompt: pageData.prompt,
+              associateAssetsIds: pageData.associateAssetsIds,
+              src: null,
+              state: pageData.state,
+              videoDesc: pageData.videoDesc,
+              shouldGenerateImage: pageData.shouldGenerateImage,
+              track: pageData.track,
+            });
+            wbData.storyboard = sbList;
+            if (wbRow) {
+              await u.db("o_agentWorkData").where({ id: wbRow.id }).update({ data: JSON.stringify(wbData) });
+            } else {
+              await u.db("o_agentWorkData").insert({ projectId, episodesId: scriptId, key: "productionAgent", data: JSON.stringify(wbData) });
+            }
+          }
+          thinking.appendText("新增的分镜数据:\n" + JSON.stringify(pageData, null, 2) + `\n分镜ID: ${insertedId ?? "?"}`);
+          thinking.updateTitle(`新增分镜成功(ID ${insertedId ?? "?"})`);
+          thinking.complete();
+          return { success: true, id: insertedId };
+        } catch (e: any) {
+          const errMsg = e?.response?.data?.message || e?.message || "新增分镜失败";
+          thinking.appendText("新增的分镜数据:\n" + JSON.stringify(pageData, null, 2) + `\n错误: ${errMsg}`);
+          thinking.updateTitle("新增分镜失败");
+          thinking.complete();
+          return `新增分镜失败: ${errMsg}`;
+        }
       },
     }),
   };

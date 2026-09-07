@@ -114,6 +114,7 @@ interface HistoryEntry {
 // ============================================================
 
 declare const axios: any;
+declare const axiosDirect: any;
 declare const logger: (msg: string) => void;
 declare const pollTask: (fn: () => Promise<PollResult>, interval?: number, timeout?: number) => Promise<PollResult>;
 declare const urlToBase64: (url: string) => Promise<string>;
@@ -135,8 +136,7 @@ const vendor: VendorConfig = {
   version: "2.0",
   author: "Mavis (本机 ComfyUI 适配 v2)",
   name: "本机 ComfyUI v2",
-  description: "## 本机 ComfyUI 直连供应商 v2\n\n通过 ComfyUI 8188 HTTP API 调用本机已部署的 ComfyUI 出图/出视频。\n\n**51 个核心 model（19 图像 + 28 视频 + 3 TTS + 1 文本占位；数量=模板 models 数组，勿写死）**\n\n> 2026-08-31: flux2 文本编码器全系已切换 fp8（mistral_3_small_flux2_fp8 18GB，替代 bf16 33GB），缓解 16GB 卡显存/内存瓶颈。\n\n### 图像（19 个）\n- **SDXL 文生图** - sdxl-t2i\n- **FLUX2 文生图** - flux2-t2i\n- **FLUX2 多图参考生分镜图** - flux2-t2i-multiref（2026-08-31 新增）\n- **FLUX1-dev 文生图** - flux1-t2i\n- **HiDream I1 文生图** - hidream-t2i\n- **Qwen-Image 文生图** - qwen-image-t2i\n- **Qwen-Image-Edit 图生图** - qwen-image-edit\n- **Z-image Turbo** - z-image-turbo\n- **Z-image 角色LoRA** - z-image-character\n- **简易自动出图** - simple-auto-img\n- **自动出图工作流** - auto-workflow-img\n- **SD 放大** - sd-upscale-img\n- **FaceDetailer 脸部增强** - face-detailer\n- **增强肖像模板** - portrait-enhance\n- **Hires fix 高清修复** - hires-fix\n- **基础超分辨率** - upscale-usdu\n- **SDXL 肖像 FaceID** - sdxl-portrait-faceid\n- **LTX-2.3 4K 放大** - ltx2.3-4k-upscale\n- **FLUX2 + Turbo LoRA** - flux2-turbo-lora\n\n### 视频（28 个）\n- **LTX-2B 旧版文生视频** - ltx-2b-t2v\n- **LTX-2.3 满血 fp8 文生视频** - ltx2.3-t2v-full\n- **LTX-2.3 nvfp4 图生视频** - ltx2.3-i2v-nvfp4\n- **MiniMax-H3 FL2VA 首帧图生视频** - h3-fl2va-first\n- **MiniMax-H3 Ref2VA 图片参考** - h3-ref2va-image\n- **MiniMax-H3 T2VA 文生视频+音频** - h3-t2va\n- **MiniMax-H3 V2A 视频转音频** - h3-v2a\n- **LTX-2.3 首尾帧 v1** - ltx2.3-startend\n- **LTX-2.3 首尾双图流满血** - ltx2.3-startend-full\n- **LTX-2.3 真首尾帧** - ltx2.3-truly-startend\n- **LTX-2.3 真首尾帧-软** - ltx2.3-truly-startend-soft\n- **LTX-2.3 真首尾帧-强** - ltx2.3-truly-startend-strong\n- **LTX-2.3 真首尾帧-非对称** - ltx2.3-truly-startend-asymmetric\n- **LTX-2.3 nvfp4 真首尾帧** - ltx2.3-nvfp4-startend\n- **LTX-2.3 fp8 真首尾帧** - ltx2.3-fp8-startend\n- **LTX-2.3 fp8 真首尾帧-8步** - ltx2.3-fp8-startend-8step\n- **LTX-2.3 视频修复** - ltx2.3-repair\n- **Hunyuan 文生视频** - hunyuan-t2v\n- **LTX-2.3 AV-LoRA talking-head** - ltx2.3-av-talking-head\n- **LTX-2.3 transition 转场** - ltx2.3-transition\n- **LTX-2.3 蒸馏快速** - ltx2.3-distilled-fast\n- **LTX-2.3 Licon 多图参考** - ltx2.3-licon-vbvr\n- **LTX-2.3 IC-Union control** - ltx2.3-ic-union-control\n- **LTX-2.3 IC-Union 6ref** - ltx2.3-ic-union-control-6ref\n- **LTX-2.3 4宫格1shot** - ltx2.3-4grid-1shot\n- **LTX-2.3 IC-Motion track** - ltx2.3-ic-motion-track\n- **SVD 图生视频** - svd-i2v\n- **LTX-2.3 SVD 段间过渡** - ltx2.3-svd-crossfade\n\n### TTS（3 个）\n- **F5-TTS** - f5-tts\n- **E2-TTS** - e2-tts\n- **ElevenLabs** - elevenlabs\n\n**跑不通**（本机缺模型/节点）：FireRed-Edit/SCAIL/Qwen3-TTS/Qwen-2511\n**已删除**（8/13 主人指令）：1-WAN(partner API)、Wan 2.2 Animate NVFP4（生图/视频都不走）",
-  inputs: [
+  description: "## 本机 ComfyUI 直连供应商 v2\n\n通过本机 ComfyUI 8188 HTTP API 调用本机已部署的 ComfyUI 出图/出视频。\n\n提供 51 个模型：20 个图像生成、28 个视频生成、3 个语音合成。\n\n> ⚠️ MiniMax-H3 需较高显存（面向 24GB 显卡）。在本机 16GB 显卡上，重负载任务（文生视频、音频/视频多模态参考）可能导致 ComfyUI 崩溃；请优先使用轻量的 FL2VA 首帧/首尾帧/Ref2VA 图片，或改用更稳的 LTX-2.3。\n\n**跑不通**（本机缺模型/节点）：FireRed-Edit / SCAIL / Qwen3-TTS / Qwen-2511",  inputs: [
     { key: "baseUrl", label: "ComfyUI 服务地址", type: "url", required: true, placeholder: "http://127.0.0.1:8188" },
     { key: "apiKey", label: "ComfyUI API Key（可选，本机无 auth 留空）", type: "password", required: false, placeholder: "本机默认无认证，留空" },
   ],
@@ -145,65 +145,65 @@ const vendor: VendorConfig = {
     apiKey: "",
   },
   models: [
-    { name: "ComfyUI 不出文本", modelName: "noop-text", type: "text", think: false },
+    { name: "文本占位（仅供配置）", modelName: "noop-text", type: "text", think: false },
     // ========== 图像（9 个核心）==========
     {
-      name: "SDXL 文生图 (base+refiner 1024x1024)",
+      name: "SDXL 文生图",
       modelName: "sdxl-t2i",
       type: "image",
       mode: ["text"],
     },
     {
-      name: "Z-image Turbo (8 步快速出图 1024x1024)",
+      name: "Z-image Turbo 快速出图",
       modelName: "z-image-turbo",
       type: "image",
       mode: ["text"],
     },
     {
-      name: "简易自动出图 (DreamShaper SD1.5 8 步)",
+      name: "简易自动出图 (SD1.5)",
       modelName: "simple-auto-img",
       type: "image",
       mode: ["text"],
     },
     {
-      name: "自动出图工作流 (SDXL base 自动)",
+      name: "自动文生图 (SDXL)",
       modelName: "auto-workflow-img",
       type: "image",
       mode: ["text"],
     },
     {
-      name: "SD 图片放大 (Realistic Vision 图生图)",
+      name: "SD 图片放大 (图生图)",
       modelName: "sd-upscale-img",
       type: "image",
       mode: ["singleImage"],
     },
     {
-      name: "FaceDetailer 脸部增强 (SD1.5 + Detailer)",
+      name: "FaceDetailer 脸部增强",
       modelName: "face-detailer",
       type: "image",
       mode: ["singleImage"],
     },
     {
-      name: "增强肖像工作流 (SDXL + 增强)",
+      name: "增强肖像 (SDXL)",
       modelName: "portrait-enhance",
       type: "image",
       mode: ["singleImage"],
     },
     {
-      name: "Hires fix 高清修复 (SDXL + 二次采样)",
+      name: "Hires fix 高清修复",
       modelName: "hires-fix",
       type: "image",
       mode: ["text"],
     },
     {
-      name: "基础超分辨率 (SDXL + 4x Upscale)",
+      name: "基础超分辨率 (SDXL 4x)",
       modelName: "upscale-usdu",
       type: "image",
       mode: ["singleImage"],
     },
     // ========== 视频（8 个核心）==========
     {
-      name: "LTX-2B 旧版文生视频 (768x512 24 帧)",
+      name: "LTX-2B 文生视频",
       modelName: "ltx-2b-t2v",
       type: "video",
       mode: ["text"],
@@ -213,7 +213,7 @@ const vendor: VendorConfig = {
       ],
     },
     {
-      name: "LTX-2.3 22B 满血 fp8 文生视频 (848x480 高质量)",
+      name: "LTX-2.3 文生视频 (fp8 高质量)",
       modelName: "ltx2.3-t2v-full",
       type: "video",
       mode: ["text"],
@@ -223,7 +223,7 @@ const vendor: VendorConfig = {
       ],
     },
     {
-      name: "LTX-2.3 22B nvfp4 图生视频 (低显存 8 步快速)",
+      name: "LTX-2.3 图生视频 (nvfp4 低显存)",
       modelName: "ltx2.3-i2v-nvfp4",
       type: "video",
       mode: ["singleImage"],
@@ -234,7 +234,7 @@ const vendor: VendorConfig = {
     },
     // ---- MiniMax-H3 轻量版 (2026-08-26 新增) ----
     {
-      name: "MiniMax-H3 FL2VA 首帧图生视频 (单图 → 视频+音频)",
+      name: "MiniMax-H3 首帧图生视频",
       modelName: "h3-fl2va-first",
       type: "video",
       mode: ["singleImage"],
@@ -244,7 +244,7 @@ const vendor: VendorConfig = {
       ],
     },
     {
-      name: "MiniMax-H3 Ref2VA 图片参考生视频 (1 张 ref 图)",
+      name: "MiniMax-H3 图片参考生视频",
       modelName: "h3-ref2va-image",
       type: "video",
       mode: ["imageReference:1"],
@@ -254,7 +254,7 @@ const vendor: VendorConfig = {
       ],
     },
     {
-      name: "MiniMax-H3 T2VA 文生视频+音频 (无参考)",
+      name: "MiniMax-H3 文生视频+音频",
       modelName: "h3-t2va",
       type: "video",
       mode: ["text"],
@@ -264,7 +264,7 @@ const vendor: VendorConfig = {
       ],
     },
     {
-      name: "MiniMax-H3 V2A 视频转音频 (源视频 + 加音轨)",
+      name: "MiniMax-H3 视频转音频",
       modelName: "h3-v2a",
       type: "video",
       mode: ["videoReference:1"],
@@ -274,7 +274,7 @@ const vendor: VendorConfig = {
       ],
     },
     {
-      name: "LTX-2.3 首尾帧 v1 (蒸馏 8 步 + LTX 节点链)",
+      name: "LTX-2.3 首尾帧 (蒸馏快速)",
       modelName: "ltx2.3-startend",
       type: "video",
       mode: ["startEndRequired", "endFrameOptional", "startFrameOptional", "singleImage"],
@@ -284,7 +284,7 @@ const vendor: VendorConfig = {
       ],
     },
     {
-      name: "LTX-2.3 首尾双图流满血 (22B fp8 + distilled lora)",
+      name: "LTX-2.3 首尾帧 (fp8 高质量)",
       modelName: "ltx2.3-startend-full",
       type: "video",
       mode: ["startEndRequired", "endFrameOptional", "startFrameOptional"],
@@ -298,7 +298,7 @@ const vendor: VendorConfig = {
       // 替代 startend-full 假首尾帧(只接单图 LTXVImgToVideo, 末图参数被忽略)
       // 场景: 跨段衔接 (section_X 末 = section_X+1 首), 锁死首末姿势
       // 2026-08-15 v7 备注: 此 entry 保留 backward compat, 默认 strength=0.8; 短段(<5s)推荐用 strong, 中长段推荐用 soft
-      name: "LTX-2.3 真首尾帧 (22B fp8 + LTXVFirstLastFrameControl_TTP)",
+      name: "LTX-2.3 真首尾帧",
       modelName: "ltx2.3-truly-startend",
       type: "video",
       mode: ["startEndRequired"],
@@ -311,7 +311,7 @@ const vendor: VendorConfig = {
       // 2026-08-15 v7 新增: 软首尾 (0.8) 释放中段自由度
       // 适用: 中长段 (≥5s), 需要中段戏剧性, 接受首末 0.2 自由度
       // 经验 13 反例: 2a 7s 中长段用 0.8 → 0-1.5s 黑帧; v7 改用 strong
-      name: "LTX-2.3 真首尾帧-软 (22B fp8 + 0.8 释放中段)",
+      name: "LTX-2.3 真首尾帧 (柔, 首末 0.8)",
       modelName: "ltx2.3-truly-startend-soft",
       type: "video",
       mode: ["startEndRequired"],
@@ -324,7 +324,7 @@ const vendor: VendorConfig = {
       // 2026-08-15 v7 新增: 强首尾 (1.0) 锁死首末姿势
       // 适用: 短段 (≤5s) / 跨度小 / 必须首末像素级锁定
       // 修 v6 经验 13 反例: 2a_03 1s 全黑, strength 0.8 中段"未填充期"被延长
-      name: "LTX-2.3 真首尾帧-强 (22B fp8 + 1.0 锁死首末)",
+      name: "LTX-2.3 真首尾帧 (强, 首末锁定)",
       modelName: "ltx2.3-truly-startend-strong",
       type: "video",
       mode: ["startEndRequired"],
@@ -339,7 +339,7 @@ const vendor: VendorConfig = {
       // first 0.8: 释放首段, 中段可"动" (戏剧性, 类似 soft 0.8)
       // last 1.0: 锁死末帧, 跨段衔接稳 (类似 strong 1.0)
       // 经验 14 验证假设: asymmetric = 戏剧性 + 末帧稳双拿
-      name: "LTX-2.3 真首尾帧-非对称 (first 0.8 + last 1.0)",
+      name: "LTX-2.3 真首尾帧 (非对称, 首柔尾锁)",
       modelName: "ltx2.3-truly-startend-asymmetric",
       type: "video",
       mode: ["startEndRequired"],
@@ -353,7 +353,7 @@ const vendor: VendorConfig = {
       // 主人新规: 禁用 ltx 2.3 distilled lora 加载工作流, 用此 vendor 替代 ltx2.3-truly-startend
       // 适用: 跨段衔接 (startEndRequired) + 低显存快速出片 (nvfp4 4-bit 比 fp8 显存省 50%)
       // audio: 传 audioRef 路径则加 LTXVReferenceAudio 节点 (跟 ltx2.3-av-talking-head 同样 audio 流程)
-      name: "LTX-2.3 nvfp4 真首尾帧 (22B 量化, 8 步, 禁 distilled lora, 可选 audio)",
+      name: "LTX-2.3 首尾帧 (nvfp4 低显存)",
       modelName: "ltx2.3-nvfp4-startend",
       type: "video",
       mode: ["startEndRequired", "audioOptional"],
@@ -366,7 +366,7 @@ const vendor: VendorConfig = {
       // 2026-08-15 v9 P2: 22B fp8 满血 (无 distilled lora) + 真首尾帧 + 20 步 + 可选 audio
       // 替代 ltx2.3-truly-startend (22B fp8 + distilled lora) — 禁 distilled lora 后的 fp8 满血方案
       // 与 ltx2.3-nvfp4-startend 对比: ckpt 改 fp8 (满血, 显存需求高) + 步数 20 (满血默认)
-      name: "LTX-2.3 fp8 真首尾帧 (22B 满血, 20 步, 禁 distilled lora, 可选 audio)",
+      name: "LTX-2.3 首尾帧 (fp8 高质量)",
       modelName: "ltx2.3-fp8-startend",
       type: "video",
       mode: ["startEndRequired", "audioOptional"],
@@ -381,7 +381,7 @@ const vendor: VendorConfig = {
       // 8 步方案目标: 显存占用减半, 单段耗时减少 ~60%, 5 段连续不堆积
       // 锁死 first/last=1.0: 8 步收敛不够, 0.7 软锚会引入画面分裂/右半边消失; 1.0 强制首末像素级锁死, 中段可牺牲
       // audio: 暂不启用 (8 步快出图优先, audio 让 fps 翻倍 → 跟 5s 短段不兼容)
-      name: "LTX-2.3 fp8 真首尾帧-8步快速 (22B 满血, 8 步, 1.0 锁首末, 禁 distilled lora)",
+      name: "LTX-2.3 首尾帧 (fp8 8步快速)",
       modelName: "ltx2.3-fp8-startend-8step",
       type: "video",
       mode: ["startEndRequired"],
@@ -391,7 +391,7 @@ const vendor: VendorConfig = {
       ],
     },
     {
-      name: "LTX-2.3 视频修复 (22B fp8 + SeedVR2)",
+      name: "LTX-2.3 视频修复 (SeedVR2)",
       modelName: "ltx2.3-repair",
       type: "video",
       mode: ["singleImage"],
@@ -401,43 +401,48 @@ const vendor: VendorConfig = {
       ],
     },
     {
-      name: "FLUX2 文生图 (mistral + fp8mixed)",
+      name: "FLUX2 文生图",
       modelName: "flux2-t2i",
       type: "image",
       mode: ["text"],
     },
     {
-      name: "FLUX2 多图参考生分镜图 (最多6张资产参考图, Kontext offset 拼接)", 
-      modelName: "flux2-t2i-multiref",
+      name: "FLUX2 多图参考生分镜图",       modelName: "flux2-t2i-multiref",
       type: "image",
       mode: ["singleImage"],
     },
     {
-      name: "FLUX1-dev 文生图 (fp8 + clip_l + t5xxl)",
-      modelName: "flux1-t2i",
+      name: "FLUX1-dev 多图参考生分镜图 (IPAdapter 一致性+景别差异)",
+      modelName: "flux1-t2i-multiref-ipa",
+      type: "image",
+      mode: ["singleImage"],
+      associationSkills: "director_storyboard",
+    },
+    {
+      name: "FLUX1-dev 文生图",      modelName: "flux1-t2i",
       type: "image",
       mode: ["text"],
     },
     {
-      name: "HiDream I1 文生图 (17B fp8 + clip_l/g)",
+      name: "HiDream I1 文生图",
       modelName: "hidream-t2i",
       type: "image",
       mode: ["text"],
     },
     {
-      name: "Qwen-Image 文生图 (20B fp8 + qwen_vl)",
+      name: "Qwen-Image 文生图",
       modelName: "qwen-image-t2i",
       type: "image",
       mode: ["text"],
     },
     {
-      name: "Qwen-Image-Edit 2511 图生图 (20B fp8 + qwen_vl)",
+      name: "Qwen-Image 图生图 (编辑)",
       modelName: "qwen-image-edit",
       type: "image",
       mode: ["singleImage"],
     },
     {
-      name: "Hunyuan Video 文生视频 (13B 720p + umt5)",
+      name: "Hunyuan 文生视频",
       modelName: "hunyuan-t2v",
       type: "video",
       mode: ["text"],
@@ -451,7 +456,7 @@ const vendor: VendorConfig = {
     // ============================================================
     // ---- A 档 (5 个, 已砍掉 hunyuan-i2v-720p) ----
     {
-      name: "LTX-2.3 AV-LoRA talking-head (22B + 音频驱动说话)",
+      name: "LTX-2.3 音频驱动口型 (talking-head)",
       modelName: "ltx2.3-av-talking-head",
       type: "video",
       mode: ["audioReference", "singleImage"],
@@ -461,7 +466,7 @@ const vendor: VendorConfig = {
       ],
     },
     {
-      name: "LTX-2.3 transition 转场 (22B + transition LoRA + zhuanchang)",
+      name: "LTX-2.3 转场 (transition)",
       modelName: "ltx2.3-transition",
       type: "video",
       mode: ["startEndRequired"],
@@ -471,7 +476,7 @@ const vendor: VendorConfig = {
       ],
     },
     {
-      name: "LTX-2.3 distilled-fast 快速出片 (22B + distilled-384 LoRA, 8 步)",
+      name: "LTX-2.3 快速出片 (蒸馏)",
       modelName: "ltx2.3-distilled-fast",
       type: "video",
       mode: ["text", "singleImage"],
@@ -481,7 +486,7 @@ const vendor: VendorConfig = {
       ],
     },
     {
-      name: "LTX-2.3 Licon-VBVR 多图参考 (22B + LiconMSR, 1-4 张 ref)",
+      name: "LTX-2.3 多图参考生视频 (Licon)",
       modelName: "ltx2.3-licon-vbvr",
       type: "video",
       mode: ["imageReference:4"],
@@ -492,7 +497,7 @@ const vendor: VendorConfig = {
     },
     // ---- B 档 (5 个) ----
     {
-      name: "LTX-2.3 IC-LoRA union-control (22B + union LoRA + depth/pose/canny)",
+      name: "LTX-2.3 结构控制生视频 (IC-LoRA)",
       modelName: "ltx2.3-ic-union-control",
       type: "video",
       mode: ["imageReference:2"],
@@ -502,7 +507,7 @@ const vendor: VendorConfig = {
       ],
     },
     {
-      name: "LTX-2.3 IC-LoRA union-control 6 ref timeline (22B + 6 串联 guide 节点, 1 段多参生视频)",
+      name: "LTX-2.3 六图参考生视频 (IC-LoRA)",
       modelName: "ltx2.3-ic-union-control-6ref",
       type: "video",
       mode: ["imageReference:6"],
@@ -517,7 +522,7 @@ const vendor: VendorConfig = {
       // 4 张 ref 在 4 个 frame_idx 引导 IC-LoRA attention, 1 段 25s 一次性生视频
       // 跟 v13 6ref 区别: v13 是 6 张独立图, v14 是 1 张 4 宫格拼图 (workflow 内部拆)
       // 优势: imageReference 只需要 1 张 (不是 6), vendor 内部完成拆图
-      name: "LTX-2.3 4 宫格 1-shot (22B fp8 + 1 张 2x2 拼图 ref, 内部拆 4 张, 单 LTXVAddGuideMulti)",
+      name: "LTX-2.3 4宫格图生视频",
       modelName: "ltx2.3-4grid-1shot",
       type: "video",
       mode: ["imageReference:1"],
@@ -527,7 +532,7 @@ const vendor: VendorConfig = {
       ],
     },
     {
-      name: "LTX-2.3 IC-LoRA motion-track (22B + motion LoRA + 运动参考)",
+      name: "LTX-2.3 运动控制生视频 (IC-LoRA)",
       modelName: "ltx2.3-ic-motion-track",
       type: "video",
       mode: ["imageReference:2"],
@@ -537,7 +542,7 @@ const vendor: VendorConfig = {
       ],
     },
     {
-      name: "SVD 图生视频 (svd.safetensors + Baked VAE + clip_vision_h)",
+      name: "SVD 图生视频",
       modelName: "svd-i2v",
       type: "video",
       mode: ["singleImage"],
@@ -547,32 +552,32 @@ const vendor: VendorConfig = {
       ],
     },
     {
-      name: "z-image + 角色 LoRA (韩立/宋玉/慕沛灵/梅凝/燕如嫣/紫灵 trigger)",
+      name: "Z-image 角色 LoRA 出图",
       modelName: "z-image-character",
       type: "image",
       mode: ["text"],
     },
     {
-      name: "SDXL + IP-Adapter faceid (plus-face + insightface buffalo_l, 锁人脸)",
+      name: "SDXL 肖像生成 (IP-Adapter 锁脸)",
       modelName: "sdxl-portrait-faceid",
       type: "image",
       mode: ["singleImage"],
     },
     // ---- C 档 (3 个, C-1 合并到 A-1) ----
     {
-      name: "LTX 4K 上采 (SDXL + RealESRGAN_x4plus, 限定 2K 防 OOM)",
+      name: "LTX-2.3 4K 放大",
       modelName: "ltx2.3-4k-upscale",
       type: "image",
       mode: ["singleImage"],
     },
     {
-      name: "Flux2 + Turbo LoRA (Flux_2-Turbo-LoRA 4 步极速出图)",
+      name: "FLUX2 Turbo 极速出图",
       modelName: "flux2-turbo-lora",
       type: "image",
       mode: ["text"],
     },
     {
-      name: "LTX-SVD 段间过渡 (SVD + smooth crossfade prompt, 段末 + 段首)",
+      name: "LTX-2.3 段间过渡 (SVD)",
       modelName: "ltx2.3-svd-crossfade",
       type: "video",
       mode: ["imageReference:2"],
@@ -588,7 +593,7 @@ const vendor: VendorConfig = {
       // F5-TTS (AIFSH F5-TTS-ComfyUI) — 开源 SOTA 音色克隆 TTS
       // 2026-08-14 实测: F5TTSNode 缺 torchcodec 依赖, 需 `pip install torchcodec` 才能跑
       // (ComfyUI 0.28 + torchaudio 2.9.1 切到 torchcodec 后端, F5TTSNode 源码用 torchaudio.save 触发 ImportError)
-      name: "F5-TTS (开源 SOTA, 本机 ref_audio 音色克隆, 需 torchcodec)",
+      name: "F5-TTS 语音合成",
       modelName: "f5-tts",
       type: "tts",
       voices: [
@@ -598,7 +603,7 @@ const vendor: VendorConfig = {
     },
     {
       // E2-TTS (F5-TTS 变体, 英文友好, 同样需 torchcodec)
-      name: "E2-TTS (F5-TTS 变体, 英文友好, 需 torchcodec)",
+      name: "E2-TTS 语音合成",
       modelName: "e2-tts",
       type: "tts",
       voices: [
@@ -609,7 +614,7 @@ const vendor: VendorConfig = {
     {
       // ElevenLabs 云端 TTS — 需在 vendor.inputValues.apiKey 配 ElevenLabs API key
       // (vendor getHeaders() 自动透传 Authorization Bearer 头)
-      name: "ElevenLabs (云端 TTS, 需 API key)",
+      name: "ElevenLabs 云端语音",
       modelName: "elevenlabs",
       type: "tts",
       voices: [
@@ -628,8 +633,17 @@ const vendor: VendorConfig = {
 
 function getHeaders(): Record<string, string> {
   const h: Record<string, string> = { "Content-Type": "application/json" };
-  if (vendor.inputValues.apiKey) h["Authorization"] = `Bearer ${vendor.inputValues.apiKey}`;
+  const auth = getAuthHeader();
+  if (auth) h["Authorization"] = auth;
   return h;
+}
+
+// 2026-08-31: 抽公共 Auth 头生成 — apiKey 含 ":" 时走 Basic Auth, 否则 Bearer
+function getAuthHeader(): string | null {
+  const ak = vendor.inputValues.apiKey;
+  if (!ak) return null;
+  if (ak.includes(":")) return `Basic ${Buffer.from(ak).toString("base64")}`;
+  return `Bearer ${ak}`;
 }
 
 function getBaseUrl(): string {
@@ -685,7 +699,7 @@ function lengthFromDuration(durationSec: number, fps: number = 24): number {
 }
 
 async function comfyPost(path: string, body: any, timeoutMs = 30_000): Promise<any> {
-  const resp = await axios.post(`${getBaseUrl()}${path}`, body, {
+  const resp = await axiosDirect.post(`${getBaseUrl()}${path}`, body, {
     headers: getHeaders(),
     timeout: timeoutMs,
   });
@@ -693,7 +707,7 @@ async function comfyPost(path: string, body: any, timeoutMs = 30_000): Promise<a
 }
 
 async function comfyGet(path: string, timeoutMs = 30_000): Promise<any> {
-  const resp = await axios.get(`${getBaseUrl()}${path}`, {
+  const resp = await axiosDirect.get(`${getBaseUrl()}${path}`, {
     headers: getHeaders(),
     timeout: timeoutMs,
   });
@@ -701,7 +715,7 @@ async function comfyGet(path: string, timeoutMs = 30_000): Promise<any> {
 }
 
 async function comfyDownloadView(filename: string, subfolder: string, type: string): Promise<Buffer> {
-  const resp = await axios.get(`${getBaseUrl()}/view`, {
+  const resp = await axiosDirect.get(`${getBaseUrl()}/view`, {
     params: { filename, subfolder, type },
     headers: getHeaders(),
     responseType: "arraybuffer",
@@ -717,8 +731,9 @@ async function comfyUploadImage(base64: string, filename: string = "ref.png"): P
   form.append("image", buffer, { filename, contentType: "image/png" });
   form.append("type", "input");
   form.append("overwrite", "true");
-  const resp = await axios.post(`${getBaseUrl()}/upload/image`, form, {
-    headers: { ...form.getHeaders?.(), ...(vendor.inputValues.apiKey ? { Authorization: `Bearer ${vendor.inputValues.apiKey}` } : {}) },
+  const resp = await axiosDirect.post(`${getBaseUrl()}/upload/image`, form, {
+    // 2026-08-31: 用 getAuthHeader() 替代硬编码 Bearer, 兼容 apiKey="user:pass" 的 Basic Auth 模式
+    headers: { ...form.getHeaders?.(), ...(getAuthHeader() ? { Authorization: getAuthHeader() } : {}) },
     timeout: 60_000,
   });
   return resp.data.name;
@@ -733,8 +748,9 @@ async function comfyUploadAudio(base64: string, filename: string = "ref.wav"): P
   form.append("image", buffer, { filename, contentType: "audio/wav" });
   form.append("type", "input");
   form.append("overwrite", "true");
-  const resp = await axios.post(`${getBaseUrl()}/upload/image`, form, {
-    headers: { ...form.getHeaders?.(), ...(vendor.inputValues.apiKey ? { Authorization: `Bearer ${vendor.inputValues.apiKey}` } : {}) },
+  const resp = await axiosDirect.post(`${getBaseUrl()}/upload/image`, form, {
+    // 2026-08-31: 用 getAuthHeader() 替代硬编码 Bearer, 兼容 apiKey="user:pass" 的 Basic Auth 模式
+    headers: { ...form.getHeaders?.(), ...(getAuthHeader() ? { Authorization: getAuthHeader() } : {}) },
     timeout: 60_000,
   });
   return resp.data.name;
@@ -831,6 +847,23 @@ function newSeed(): number {
   return Math.floor(Math.random() * 1e15);
 }
 
+// 2026-08-31: 清洗 LLM 输出里的 @图N 占位符(flux 不解析 @图1/@图2 这种文字, 是死代码噪音,
+// 会让 flux2 把 "@图1 为奥尔特星云边缘场景" 当成无意义 token。清洗后只留真实画面描述+风格,
+// 让 prompt 真正驱动构图/景别。ref 图经 ReferenceLatent/IPAdapter 单独注入, 与 @图N 无关)
+function cleanPrompt(prompt: string): string {
+  if (!prompt) return "";
+  return (
+    prompt
+      .replace(/@图\d+/g, "")                 // 去 @图N
+      .replace(/为(?:奥尔特星云边缘|方舟号舰桥|方舟号|全息星图|年轻大副|林澈|虫群母舰|通讯器|虫群潮水)[^,，。]*?(?:场景|道具|角色)?/g, "")  // 去 "@图N 为xxx场景/道具/角色" 的说明句
+      .replace(/，\s*\[画面\]/g, ", 【画面】")  // 规范化
+      .replace(/，\s*【画面】/g, ", 【画面】")
+      .replace(/[，,]\s*保持\s*@图\d+.*$/g, "")  // 去尾部 "保持 @图N 造型一致"
+      .replace(/\s{2,}/g, " ")
+      .trim()
+  );
+}
+
 // ---- IMAGE BUILDERS ----
 
 function buildSdxlT2i(prompt: string, width: number, height: number, seed: number): any {
@@ -903,13 +936,7 @@ function buildFlux2T2i(prompt: string, width: number, height: number, seed: numb
 // 多个 reference_latents 逐张串联 (前一个 conditioning 作为下一个输入), 最后用 FluxKontextMultiReferenceLatentMethod(reference_latents_method="offset") 合并
 // 显存: 与 flux2-t2i 相当 (fp8 文本编码器 + fp8mixed UNet), 16GB 卡可用
 function buildFlux2T2iMultiRef(prompt: string, width: number, height: number, seed: number, refNames: string[]): any {
-  const nodes: Record<string, any> = {
-    "1": { class_type: "UNETLoader", inputs: { unet_name: "flux2_dev_fp8mixed.safetensors", weight_dtype: "default" } },
-    "2": { class_type: "CLIPLoader", inputs: { clip_name: "mistral_3_small_flux2_fp8.safetensors", type: "flux2", device: "default" } },
-    "3": { class_type: "VAELoader", inputs: { vae_name: "full_encoder_small_decoder.safetensors" } },
-    "4": { class_type: "ModelSamplingFlux", inputs: { model: ["1", 0], max_shift: 1.15, base_shift: 0.5, width, height } },
-    "5": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: prompt } },
-    "6": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: NEGATIVE_DEFAULT } },
+    "5": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: cleanedPrompt } },    "6": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: NEGATIVE_DEFAULT } },
     "7": { class_type: "FluxGuidance", inputs: { conditioning: ["5", 0], guidance: 3.5 } },
     "8": { class_type: "EmptyLatentImage", inputs: { width, height, batch_size: 1 } },
   };
@@ -964,6 +991,53 @@ function buildFlux1T2i(prompt: string, width: number, height: number, seed: numb
     "10": { class_type: "VAEDecode", inputs: { samples: ["9", 0], vae: ["3", 0] } },
     "11": { class_type: "SaveImage", inputs: { images: ["10", 0], filename_prefix: "toonflow_flux1" } },
   };
+}
+
+// ---- FLUX1-dev + IPAdapter 多参考图 (2026-08-31 新增) ----
+// 方案B: IPAdapter(InstantX/XLabs 的 xlab_flux_ip_adapter_v1) 是 flux1-dev 专用多参考图机制.
+// 与 Kontext offset(flux2) 不同, IPAdapter 用 clip_vision 编码 ref → attention patch,
+// 同时保留 CLIP 文本引导(KSampler cfg 可调高, 让"远景/特写/大副面部"等文本指令真正生效),
+// 既保证角色/场景/道具一致性, 又能体现分镜之间的构图/景别差异(解决"8张图一样"问题).
+// 节点链: UNETLoader(flux1-dev-fp8) + DualCLIPLoader(clip_l+t5xxl, flux) + VAELoader(ae)
+//   + ModelSamplingFlux + CLIPTextEncode(cleanPrompt) + FluxGuidance
+//   + IPAdapterFluxLoader(xlab_flux_ip_adapter_v1, siglip, cuda)
+//   + 每张 ref: LoadImage → ApplyIPAdapterFlux(model, ipadapterFlux, ref, weight) 串联
+//   + KSampler(cfg 3.5) + VAEDecode + SaveImage
+function buildFlux1T2iMultiRefIPA(prompt: string, width: number, height: number, seed: number, refNames: string[]): any {
+  const cleanedPrompt = cleanPrompt(prompt);
+  const nodes: Record<string, any> = {
+    // flux1-dev-fp8 是 FP8 UNet 单文件(不含clip/vae), 在 checkpoints 目录(CheckpointLoaderSimple 用).
+    // MODEL 取 [0]; CLIP 需独立 DualCLIPLoader(clip_l+t5xxl); VAE 需独立 VAELoader(ae).
+    "1": { class_type: "CheckpointLoaderSimple", inputs: { ckpt_name: "flux\\flux1-dev-fp8-e4m3fn.safetensors" } },
+    "2": { class_type: "DualCLIPLoader", inputs: { clip_name1: "clip_l.safetensors", clip_name2: "t5xxl_fp16.safetensors", type: "flux", device: "default" } },
+    "3": { class_type: "VAELoader", inputs: { vae_name: "ae.safetensors" } },
+    "4": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: cleanedPrompt } },
+    "5": { class_type: "CLIPTextEncode", inputs: { clip: ["2", 0], text: NEGATIVE_DEFAULT } },
+    "6": { class_type: "ModelSamplingFlux", inputs: { model: ["1", 0], max_shift: 1.15, base_shift: 0.5, width, height } },
+    "7": { class_type: "FluxGuidance", inputs: { conditioning: ["4", 0], guidance: 3.5 } },
+    "8": { class_type: "IPAdapterFluxLoader", inputs: { ipadapter: "xlab_flux_ip_adapter_v1.safetensors", clip_vision: "google/siglip-so400m-patch14-384", provider: "cuda" } },
+    "9": { class_type: "EmptyLatentImage", inputs: { width, height, batch_size: 1 } },
+  };
+  // 多张参考图: 逐张 ApplyIPAdapterFlux 串联 (每次接上一级 model + 一张新 ref image)
+  let curModel = "6";
+  let nodeId = 20;
+  for (let i = 0; i < refNames.length; i++) {
+    const id = nodeId;
+    nodes[`${id}`] = { class_type: "LoadImage", inputs: { image: refNames[i] } };
+    nodes[`${id + 1}`] = { class_type: "ApplyIPAdapterFlux", inputs: { model: [curModel, 0], ipadapter_flux: ["8", 0], image: [`${id}`, 0], weight: 0.8, start_percent: 0.0, end_percent: 1.0 } };
+    curModel = `${id + 1}`;
+    nodeId += 2;
+  }
+  nodes["40"] = {
+    class_type: "KSampler",
+    inputs: {
+      model: [curModel, 0], positive: ["7", 0], negative: ["5", 0], latent_image: ["9", 0],
+      seed, steps: 20, cfg: 3.5, sampler_name: "euler", scheduler: "simple", denoise: 1.0,
+    },
+  };
+  nodes["41"] = { class_type: "VAEDecode", inputs: { samples: ["40", 0], vae: ["3", 0] } };
+  nodes["42"] = { class_type: "SaveImage", inputs: { images: ["41", 0], filename_prefix: "toonflow_flux1_ipa" } };
+  return nodes;
 }
 
 // ---- MiniMax-H3 轻量版 (2026-08-26 新增) ----
@@ -2519,17 +2593,16 @@ const imageRequest = async (config: ImageConfig, model: ImageModel): Promise<str
         wf = buildFlux2T2i(config.prompt, w, h, seed);
         break;
       case "flux2-t2i-multiref":
-        // FLUX2 多图参考生分镜图：需要 1-6 张参考图，逐张上传到 ComfyUI input 目录
+        // FLUX2 多图参考生分镜图：需要 1-8 张参考图，逐张上传到 ComfyUI input 目录
         // 无参考图时自动降级为纯文生图（buildFlux2T2i），避免分镜图生成时因缺资产图而报错
-        {
+        // 2026-08-31: 上限由 6 → 8（节点层无硬上限，16GB 显存是实际瓶颈；先 8 张试点）        {
           const refs = config.referenceList || [];
           if (refs.length === 0) {
             logger("flux2-t2i-multiref 无 reference 图片, 降级为 flux2-t2i 纯文生图");
             wf = buildFlux2T2i(config.prompt, w, h, seed);
             break;
           }
-          if (refs.length > 6) throw new Error("flux2-t2i-multiref 最多 6 张参考图");
-          const refNames: string[] = [];
+          if (refs.length > 8) throw new Error("flux2-t2i-multiref 最多 8 张参考图");          const refNames: string[] = [];
           for (let i = 0; i < refs.length; i++) {
             const upName = await comfyUploadImage(refs[i].base64, `multiref_${Date.now()}_${i}.png`);
             refNames.push(upName);
@@ -2540,6 +2613,25 @@ const imageRequest = async (config: ImageConfig, model: ImageModel): Promise<str
         break;
       case "flux1-t2i":
         wf = buildFlux1T2i(config.prompt, w, h, seed);
+        break;
+      case "flux1-t2i-multiref-ipa":
+        // 2026-08-31: flux1-dev + IPAdapter 多参考图(方案B). 从 referenceList 上传 ref 图给 IPAdapter
+        {
+          const refs = config.referenceList || [];
+          if (refs.length === 0) {
+            logger("flux1-t2i-multiref-ipa 无 reference 图片, 降级为 flux1-t2i 纯文生图");
+            wf = buildFlux1T2i(config.prompt, w, h, seed);
+            break;
+          }
+          if (refs.length > 6) throw new Error("flux1-t2i-multiref-ipa 最多 6 张参考图");
+          const refNames: string[] = [];
+          for (let i = 0; i < refs.length; i++) {
+            const upName = await comfyUploadImage(refs[i].base64, `ipa_${Date.now()}_${i}.png`);
+            refNames.push(upName);
+          }
+          logger(`flux1 ipa uploaded: ${refNames.join(",")}`);
+          wf = buildFlux1T2iMultiRefIPA(config.prompt, w, h, seed, refNames);
+        }
         break;
       case "hidream-t2i":
         wf = buildHidreamT2i(config.prompt, w, h, seed);

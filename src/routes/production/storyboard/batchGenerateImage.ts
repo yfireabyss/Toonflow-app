@@ -126,17 +126,16 @@ export default router.post(
           });
       }
     };
-    // 按 concurrentCount 控制并发数，分批执行；跳过 shouldGenerateImage === 0 的分镜
+    // 并发控制: 由 utils/ai.ts 的全局 comfyMediaLimit(2) 统一兜底(跨项目/跨图像视频全局共享),
+    // 此处无需再局部限流, 直接按 storyboardData 提交即可(全局信号量会在真正调 vendor 前排队).
     let generateList = [];
     if (compulsory) {
       generateList = storyboardData;
     } else {
       generateList = storyboardData.filter((item) => item.shouldGenerateImage !== 0);
     }
-    for (let i = 0; i < generateList.length; i += concurrentCount) {
-      const batch = generateList.slice(i, i + concurrentCount);
-      await Promise.all(batch.map(generateTask));
-    }
+    // 后台异步执行, 不阻塞响应; 并发上限由 ai.ts 全局信号量保证 ≤2
+    void Promise.all(generateList.map((item) => generateTask(item)));
   },
 );
 async function getAssetsImageBase64(imageIds: number[]) {

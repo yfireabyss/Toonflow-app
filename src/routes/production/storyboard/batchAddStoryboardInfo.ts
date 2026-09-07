@@ -47,6 +47,10 @@ export default router.post(
       }
       item.id = id;
     }
+    // 2026-08-31: 同时返回本次刚插入的 id 列表(insertedIds), 与全量 storyboardData 解耦.
+    // 之前只返回全量, 调用方取 data[0].id 永远拿到 id=1, 导致 o_agentWorkData.storyboard[] JSON
+    // 里所有条目 id 都被推为 1, 引发分镜面板 58 条重复 + id 全部为 1 的故障.
+    const insertedIds: number[] = data.map((i: any) => i.id as number);
     const lastStoryboard = await u.db("o_storyboard").where("scriptId", scriptId);
     if (!lastStoryboard || !lastStoryboard.length) return res.status(400).send(error("未查到分镜数据"));
     //根据track分组
@@ -106,6 +110,6 @@ export default router.post(
         };
       }),
     );
-    return res.status(200).send(success(storyboardData));
+    return res.status(200).send(success({ insertedIds, storyboardData }));
   },
 );
