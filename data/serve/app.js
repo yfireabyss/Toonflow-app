@@ -5,11 +5,20 @@ var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
-var __esm = (fn, res) => function __init() {
-  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+var __esm = (fn, res, err) => function __init() {
+  if (err) throw err[0];
+  try {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  } catch (e) {
+    throw err = [e], e;
+  }
 };
 var __commonJS = (cb, mod) => function __require() {
-  return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  try {
+    return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  } catch (e) {
+    throw mod = 0, e;
+  }
 };
 var __export = (target, all3) => {
   for (var name28 in all3)
@@ -817,115 +826,6 @@ var require_browser = __commonJS({
   }
 });
 
-// node_modules/has-flag/index.js
-var require_has_flag = __commonJS({
-  "node_modules/has-flag/index.js"(exports2, module2) {
-    "use strict";
-    module2.exports = (flag, argv) => {
-      argv = argv || process.argv;
-      const prefix = flag.startsWith("-") ? "" : flag.length === 1 ? "-" : "--";
-      const pos = argv.indexOf(prefix + flag);
-      const terminatorPos = argv.indexOf("--");
-      return pos !== -1 && (terminatorPos === -1 ? true : pos < terminatorPos);
-    };
-  }
-});
-
-// node_modules/supports-color/index.js
-var require_supports_color = __commonJS({
-  "node_modules/supports-color/index.js"(exports2, module2) {
-    "use strict";
-    var os = require("os");
-    var hasFlag = require_has_flag();
-    var env2 = process.env;
-    var forceColor;
-    if (hasFlag("no-color") || hasFlag("no-colors") || hasFlag("color=false")) {
-      forceColor = false;
-    } else if (hasFlag("color") || hasFlag("colors") || hasFlag("color=true") || hasFlag("color=always")) {
-      forceColor = true;
-    }
-    if ("FORCE_COLOR" in env2) {
-      forceColor = env2.FORCE_COLOR.length === 0 || parseInt(env2.FORCE_COLOR, 10) !== 0;
-    }
-    function translateLevel(level) {
-      if (level === 0) {
-        return false;
-      }
-      return {
-        level,
-        hasBasic: true,
-        has256: level >= 2,
-        has16m: level >= 3
-      };
-    }
-    function supportsColor(stream4) {
-      if (forceColor === false) {
-        return 0;
-      }
-      if (hasFlag("color=16m") || hasFlag("color=full") || hasFlag("color=truecolor")) {
-        return 3;
-      }
-      if (hasFlag("color=256")) {
-        return 2;
-      }
-      if (stream4 && !stream4.isTTY && forceColor !== true) {
-        return 0;
-      }
-      const min = forceColor ? 1 : 0;
-      if (process.platform === "win32") {
-        const osRelease = os.release().split(".");
-        if (Number(process.versions.node.split(".")[0]) >= 8 && Number(osRelease[0]) >= 10 && Number(osRelease[2]) >= 10586) {
-          return Number(osRelease[2]) >= 14931 ? 3 : 2;
-        }
-        return 1;
-      }
-      if ("CI" in env2) {
-        if (["TRAVIS", "CIRCLECI", "APPVEYOR", "GITLAB_CI"].some((sign) => sign in env2) || env2.CI_NAME === "codeship") {
-          return 1;
-        }
-        return min;
-      }
-      if ("TEAMCITY_VERSION" in env2) {
-        return /^(9\.(0*[1-9]\d*)\.|\d{2,}\.)/.test(env2.TEAMCITY_VERSION) ? 1 : 0;
-      }
-      if (env2.COLORTERM === "truecolor") {
-        return 3;
-      }
-      if ("TERM_PROGRAM" in env2) {
-        const version3 = parseInt((env2.TERM_PROGRAM_VERSION || "").split(".")[0], 10);
-        switch (env2.TERM_PROGRAM) {
-          case "iTerm.app":
-            return version3 >= 3 ? 3 : 2;
-          case "Apple_Terminal":
-            return 2;
-        }
-      }
-      if (/-256(color)?$/i.test(env2.TERM)) {
-        return 2;
-      }
-      if (/^screen|^xterm|^vt100|^vt220|^rxvt|color|ansi|cygwin|linux/i.test(env2.TERM)) {
-        return 1;
-      }
-      if ("COLORTERM" in env2) {
-        return 1;
-      }
-      if (env2.TERM === "dumb") {
-        return min;
-      }
-      return min;
-    }
-    function getSupportLevel(stream4) {
-      const level = supportsColor(stream4);
-      return translateLevel(level);
-    }
-    module2.exports = {
-      supportsColor: getSupportLevel,
-      stdout: getSupportLevel(process.stdout),
-      stderr: getSupportLevel(process.stderr)
-    };
-  }
-});
-
 // node_modules/debug/src/node.js
 var require_node = __commonJS({
   "node_modules/debug/src/node.js"(exports2, module2) {
@@ -945,7 +845,7 @@ var require_node = __commonJS({
     );
     exports2.colors = [6, 2, 3, 4, 5, 1];
     try {
-      const supportsColor = require_supports_color();
+      const supportsColor = require("supports-color");
       if (supportsColor && (supportsColor.stderr || supportsColor).level >= 2) {
         exports2.colors = [
           20,
@@ -59340,7 +59240,7 @@ var require_node3 = __commonJS({
     );
     exports2.colors = [6, 2, 3, 4, 5, 1];
     try {
-      const supportsColor = require_supports_color();
+      const supportsColor = require("supports-color");
       if (supportsColor && (supportsColor.stderr || supportsColor).level >= 2) {
         exports2.colors = [
           20,
@@ -225158,6 +225058,9 @@ function runCode(code, vendor) {
     fetch,
     exports: exports2,
     axios: axios_default,
+    // 2026-08-31: 内网直连用 axios 实例(proxy:false), 供 ComfyUI 这类局域网 vendor 直连,
+    // 不走进程注入的 http_proxy(否则 DSH 白名单会拦截 192.168 POST 返回 403, 导致 ComfyUI 收不到任务).
+    axiosDirect: axios_default.create({ proxy: false }),
     FormData: import_form_data2.default,
     logger,
     jsonwebtoken: import_jsonwebtoken.default,
@@ -236840,6 +236743,174 @@ var init_dist23 = __esm({
   }
 });
 
+// node_modules/yocto-queue/index.js
+var Node, Queue;
+var init_yocto_queue = __esm({
+  "node_modules/yocto-queue/index.js"() {
+    "use strict";
+    Node = class {
+      value;
+      next;
+      constructor(value) {
+        this.value = value;
+      }
+    };
+    Queue = class {
+      #head;
+      #tail;
+      #size;
+      constructor() {
+        this.clear();
+      }
+      enqueue(value) {
+        const node = new Node(value);
+        if (this.#head) {
+          this.#tail.next = node;
+          this.#tail = node;
+        } else {
+          this.#head = node;
+          this.#tail = node;
+        }
+        this.#size++;
+      }
+      dequeue() {
+        const current = this.#head;
+        if (!current) {
+          return;
+        }
+        this.#head = this.#head.next;
+        this.#size--;
+        if (!this.#head) {
+          this.#tail = void 0;
+        }
+        return current.value;
+      }
+      peek() {
+        if (!this.#head) {
+          return;
+        }
+        return this.#head.value;
+      }
+      clear() {
+        this.#head = void 0;
+        this.#tail = void 0;
+        this.#size = 0;
+      }
+      get size() {
+        return this.#size;
+      }
+      *[Symbol.iterator]() {
+        let current = this.#head;
+        while (current) {
+          yield current.value;
+          current = current.next;
+        }
+      }
+      *drain() {
+        while (this.#head) {
+          yield this.dequeue();
+        }
+      }
+    };
+  }
+});
+
+// node_modules/p-limit/index.js
+function pLimit(concurrency) {
+  let rejectOnClear = false;
+  if (typeof concurrency === "object") {
+    ({ concurrency, rejectOnClear = false } = concurrency);
+  }
+  validateConcurrency(concurrency);
+  if (typeof rejectOnClear !== "boolean") {
+    throw new TypeError("Expected `rejectOnClear` to be a boolean");
+  }
+  const queue = new Queue();
+  let activeCount = 0;
+  const resumeNext = () => {
+    if (activeCount < concurrency && queue.size > 0) {
+      activeCount++;
+      queue.dequeue().run();
+    }
+  };
+  const next = () => {
+    activeCount--;
+    resumeNext();
+  };
+  const run = async (function_, resolve3, arguments_) => {
+    const result = (async () => function_(...arguments_))();
+    resolve3(result);
+    try {
+      await result;
+    } catch {
+    }
+    next();
+  };
+  const enqueue = (function_, resolve3, reject, arguments_) => {
+    const queueItem = { reject };
+    new Promise((internalResolve) => {
+      queueItem.run = internalResolve;
+      queue.enqueue(queueItem);
+    }).then(run.bind(void 0, function_, resolve3, arguments_));
+    if (activeCount < concurrency) {
+      resumeNext();
+    }
+  };
+  const generator = (function_, ...arguments_) => new Promise((resolve3, reject) => {
+    enqueue(function_, resolve3, reject, arguments_);
+  });
+  Object.defineProperties(generator, {
+    activeCount: {
+      get: () => activeCount
+    },
+    pendingCount: {
+      get: () => queue.size
+    },
+    clearQueue: {
+      value() {
+        if (!rejectOnClear) {
+          queue.clear();
+          return;
+        }
+        const abortError = AbortSignal.abort().reason;
+        while (queue.size > 0) {
+          queue.dequeue().reject(abortError);
+        }
+      }
+    },
+    concurrency: {
+      get: () => concurrency,
+      set(newConcurrency) {
+        validateConcurrency(newConcurrency);
+        concurrency = newConcurrency;
+        queueMicrotask(() => {
+          while (activeCount < concurrency && queue.size > 0) {
+            resumeNext();
+          }
+        });
+      }
+    },
+    map: {
+      async value(iterable, function_) {
+        const promises6 = Array.from(iterable, (value, index) => this(function_, value, index));
+        return Promise.all(promises6);
+      }
+    }
+  });
+  return generator;
+}
+function validateConcurrency(concurrency) {
+  if (!((Number.isInteger(concurrency) || concurrency === Number.POSITIVE_INFINITY) && concurrency > 0)) {
+    throw new TypeError("Expected `concurrency` to be a number from 1 and up");
+  }
+}
+var init_p_limit = __esm({
+  "node_modules/p-limit/index.js"() {
+    "use strict";
+    init_yocto_queue();
+  }
+});
+
 // src/utils/ai.ts
 async function resolveModelName(value) {
   if (AiTypeValues.includes(value)) {
@@ -236950,7 +237021,7 @@ function referenceList2imageBase642(id, input) {
   }
   return input;
 }
-var import_sucrase2, AiTypeValues, AiText, AiImage, AiVideo, AiAudio, ai_default;
+var import_sucrase2, COMFY_MEDIA_CONCURRENCY, comfyMediaLimit, AiTypeValues, AiText, AiImage, AiVideo, AiAudio, ai_default;
 var init_ai = __esm({
   "src/utils/ai.ts"() {
     "use strict";
@@ -236958,7 +237029,10 @@ var init_ai = __esm({
     init_dist23();
     init_axios2();
     import_sucrase2 = __toESM(require_dist5());
+    init_p_limit();
     init_utils3();
+    COMFY_MEDIA_CONCURRENCY = 2;
+    comfyMediaLimit = pLimit(COMFY_MEDIA_CONCURRENCY);
     AiTypeValues = [
       "scriptAgent",
       "productionAgent",
@@ -237030,7 +237104,9 @@ var init_ai = __esm({
         const exec2 = async (mn) => {
           const fn = await getVendorTemplateFn("imageRequest", mn);
           await referenceList2imageBase642(mn.split(/:(.+)/)[0], input);
-          this.result = await fn(input);
+          const vendorId = mn.split(/:(.+)/)[0];
+          const doRun = () => fn(input);
+          this.result = vendorId === "comfyui" ? await comfyMediaLimit(doRun) : await doRun();
           if (this.result.startsWith("http")) this.result = await urlToBase642(this.result);
           return this;
         };
@@ -237058,7 +237134,9 @@ var init_ai = __esm({
           const exec2 = async (mn) => {
             const fn = await getVendorTemplateFn("videoRequest", mn);
             await referenceList2imageBase642(mn.split(/:(.+)/)[0], input);
-            this.result = await fn(input);
+            const vendorId = mn.split(/:(.+)/)[0];
+            const doRun = () => fn(input);
+            this.result = vendorId === "comfyui" ? await comfyMediaLimit(doRun) : await doRun();
             if (this.result.startsWith("http")) this.result = await urlToBase642(this.result);
           };
           if (taskRecord2) {
@@ -238367,174 +238445,6 @@ var init_uploadClip = __esm({
         res.status(200).send(success3("\u4E0A\u4F20\u6210\u529F"));
       }
     );
-  }
-});
-
-// node_modules/yocto-queue/index.js
-var Node, Queue;
-var init_yocto_queue = __esm({
-  "node_modules/yocto-queue/index.js"() {
-    "use strict";
-    Node = class {
-      value;
-      next;
-      constructor(value) {
-        this.value = value;
-      }
-    };
-    Queue = class {
-      #head;
-      #tail;
-      #size;
-      constructor() {
-        this.clear();
-      }
-      enqueue(value) {
-        const node = new Node(value);
-        if (this.#head) {
-          this.#tail.next = node;
-          this.#tail = node;
-        } else {
-          this.#head = node;
-          this.#tail = node;
-        }
-        this.#size++;
-      }
-      dequeue() {
-        const current = this.#head;
-        if (!current) {
-          return;
-        }
-        this.#head = this.#head.next;
-        this.#size--;
-        if (!this.#head) {
-          this.#tail = void 0;
-        }
-        return current.value;
-      }
-      peek() {
-        if (!this.#head) {
-          return;
-        }
-        return this.#head.value;
-      }
-      clear() {
-        this.#head = void 0;
-        this.#tail = void 0;
-        this.#size = 0;
-      }
-      get size() {
-        return this.#size;
-      }
-      *[Symbol.iterator]() {
-        let current = this.#head;
-        while (current) {
-          yield current.value;
-          current = current.next;
-        }
-      }
-      *drain() {
-        while (this.#head) {
-          yield this.dequeue();
-        }
-      }
-    };
-  }
-});
-
-// node_modules/p-limit/index.js
-function pLimit(concurrency) {
-  let rejectOnClear = false;
-  if (typeof concurrency === "object") {
-    ({ concurrency, rejectOnClear = false } = concurrency);
-  }
-  validateConcurrency(concurrency);
-  if (typeof rejectOnClear !== "boolean") {
-    throw new TypeError("Expected `rejectOnClear` to be a boolean");
-  }
-  const queue = new Queue();
-  let activeCount = 0;
-  const resumeNext = () => {
-    if (activeCount < concurrency && queue.size > 0) {
-      activeCount++;
-      queue.dequeue().run();
-    }
-  };
-  const next = () => {
-    activeCount--;
-    resumeNext();
-  };
-  const run = async (function_, resolve3, arguments_) => {
-    const result = (async () => function_(...arguments_))();
-    resolve3(result);
-    try {
-      await result;
-    } catch {
-    }
-    next();
-  };
-  const enqueue = (function_, resolve3, reject, arguments_) => {
-    const queueItem = { reject };
-    new Promise((internalResolve) => {
-      queueItem.run = internalResolve;
-      queue.enqueue(queueItem);
-    }).then(run.bind(void 0, function_, resolve3, arguments_));
-    if (activeCount < concurrency) {
-      resumeNext();
-    }
-  };
-  const generator = (function_, ...arguments_) => new Promise((resolve3, reject) => {
-    enqueue(function_, resolve3, reject, arguments_);
-  });
-  Object.defineProperties(generator, {
-    activeCount: {
-      get: () => activeCount
-    },
-    pendingCount: {
-      get: () => queue.size
-    },
-    clearQueue: {
-      value() {
-        if (!rejectOnClear) {
-          queue.clear();
-          return;
-        }
-        const abortError = AbortSignal.abort().reason;
-        while (queue.size > 0) {
-          queue.dequeue().reject(abortError);
-        }
-      }
-    },
-    concurrency: {
-      get: () => concurrency,
-      set(newConcurrency) {
-        validateConcurrency(newConcurrency);
-        concurrency = newConcurrency;
-        queueMicrotask(() => {
-          while (activeCount < concurrency && queue.size > 0) {
-            resumeNext();
-          }
-        });
-      }
-    },
-    map: {
-      async value(iterable, function_) {
-        const promises6 = Array.from(iterable, (value, index) => this(function_, value, index));
-        return Promise.all(promises6);
-      }
-    }
-  });
-  return generator;
-}
-function validateConcurrency(concurrency) {
-  if (!((Number.isInteger(concurrency) || concurrency === Number.POSITIVE_INFINITY) && concurrency > 0)) {
-    throw new TypeError("Expected `concurrency` to be a number from 1 and up");
-  }
-}
-var init_p_limit = __esm({
-  "node_modules/p-limit/index.js"() {
-    "use strict";
-    init_yocto_queue();
   }
 });
 
@@ -240750,6 +240660,7 @@ var init_batchAddStoryboardInfo = __esm({
           }
           item.id = id;
         }
+        const insertedIds = data.map((i) => i.id);
         const lastStoryboard = await utils_default.db("o_storyboard").where("scriptId", scriptId);
         if (!lastStoryboard || !lastStoryboard.length) return res.status(400).send(error50("\u672A\u67E5\u5230\u5206\u955C\u6570\u636E"));
         const storyboardGroupByTrack = {};
@@ -240795,7 +240706,7 @@ var init_batchAddStoryboardInfo = __esm({
             };
           })
         );
-        return res.status(200).send(success3(storyboardData));
+        return res.status(200).send(success3({ insertedIds, storyboardData }));
       }
     );
   }
@@ -240969,10 +240880,7 @@ var init_batchGenerateImage = __esm({
         } else {
           generateList = storyboardData.filter((item) => item.shouldGenerateImage !== 0);
         }
-        for (let i = 0; i < generateList.length; i += concurrentCount) {
-          const batch = generateList.slice(i, i + concurrentCount);
-          await Promise.all(batch.map(generateTask));
-        }
+        void Promise.all(generateList.map((item) => generateTask(item)));
       }
     );
   }
@@ -257044,6 +256952,7 @@ async function scanSkills(folderPath) {
 // src/agents/productionAgent/tools.ts
 init_dist22();
 init_zod();
+init_axios2();
 init_utils3();
 var deriveAssetSchema = external_exports.object({
   id: external_exports.number().describe("\u884D\u751F\u8D44\u4EA7ID,\u5982\u679C\u65B0\u589E\u5219\u4E3A\u7A7A"),
@@ -257314,23 +257223,46 @@ var tools_default = (toolCpnfig) => {
       ),
       execute: async ({ ids }) => {
         const thinking = msg.thinking("\u6B63\u5728\u751F\u6210\u5206\u955C...");
-        socketQueue(
-          () => new Promise(
-            (resolve3, reject) => socket.emit("generateStoryboard", { ids }, (res) => {
-              if (res?.error) return reject(new Error(res.error));
-              resolve3(res);
-            })
-          )
-        ).then((res) => {
-          thinking.appendText("\u751F\u6210\u7684\u5206\u955C\u6570\u636E:\n" + JSON.stringify(res, null, 2));
-          thinking.updateTitle("\u5206\u955C\u751F\u6210\u5B8C\u6210");
+        const { projectId, scriptId } = resTool.data;
+        if (!projectId || !scriptId) {
+          thinking.appendText("\u7F3A\u5C11 projectId \u6216 scriptId\uFF0C\u65E0\u6CD5\u751F\u6210\u5206\u955C\u56FE");
+          thinking.updateTitle("\u5206\u955C\u751F\u6210\u5931\u8D25(\u7F3A\u5C11\u4E0A\u4E0B\u6587)");
           thinking.complete();
-        }).catch((e) => {
-          thinking.appendText("\u5206\u955C\u751F\u6210\u5931\u8D25:\n" + utils_default.error(e).message);
-          thinking.updateTitle("\u5206\u955C\u751F\u6210\u5931\u8D25");
+          return "\u5206\u955C\u751F\u6210\u5931\u8D25: \u7F3A\u5C11 projectId \u6216 scriptId";
+        }
+        if (!ids || !ids.length) {
+          thinking.appendText("ids \u4E3A\u7A7A\uFF0C\u65E0\u6CD5\u751F\u6210\u5206\u955C\u56FE");
+          thinking.updateTitle("\u5206\u955C\u751F\u6210\u5931\u8D25(ids\u4E3A\u7A7A)");
           thinking.complete();
-        });
-        return "\u5F00\u59CB\u751F\u6210\u5206\u955C";
+          return "\u5206\u955C\u751F\u6210\u5931\u8D25: ids \u4E3A\u7A7A";
+        }
+        try {
+          const authToken = (resTool.socket?.handshake?.auth || {})["token"];
+          const port = Number(process.env.PORT) || 10588;
+          const baseUrl = `http://127.0.0.1:${port}/api/production/storyboard/batchGenerateImage`;
+          const headers = {};
+          if (authToken) {
+            const bare = String(authToken).replace(/^Bearer\s+/i, "");
+            headers["authorization"] = `Bearer ${bare}`;
+          }
+          const resp = await axios_default.post(
+            baseUrl,
+            { projectId, scriptId, storyboardIds: ids, concurrentCount: 2, compulsory: false },
+            { headers, timeout: 3e4 }
+          );
+          const submitted = resp?.data?.data?.length ?? ids.length;
+          thinking.appendText(`\u5DF2\u63D0\u4EA4\u5206\u955C\u56FE\u751F\u6210\u4EFB\u52A1, ids=${ids.length} \u4E2A, \u8FD4\u56DE ${submitted} \u6761`);
+          thinking.updateTitle(`\u5206\u955C\u751F\u6210\u5DF2\u63D0\u4EA4(${ids.length} \u4E2A)`);
+          thinking.complete();
+          return `\u5206\u955C\u56FE\u751F\u6210\u4EFB\u52A1\u5DF2\u63D0\u4EA4: ${ids.length} \u4E2A\u5206\u955C`;
+        } catch (e) {
+          const errMsg = e?.response?.data?.message || e?.message || "\u5206\u955C\u751F\u6210\u63D0\u4EA4\u5931\u8D25";
+          thinking.appendText(`\u5206\u955C\u751F\u6210\u63D0\u4EA4\u5931\u8D25:
+${errMsg}`);
+          thinking.updateTitle("\u5206\u955C\u751F\u6210\u63D0\u4EA4\u5931\u8D25");
+          thinking.complete();
+          return `\u5206\u955C\u751F\u6210\u63D0\u4EA4\u5931\u8D25: ${errMsg}`;
+        }
       }
     }),
     add_flowData_storyboard: tool({
@@ -257347,31 +257279,76 @@ var tools_default = (toolCpnfig) => {
       ),
       execute: async (raw) => {
         const thinking = msg.thinking("\u6B63\u5728\u65B0\u589E \u5206\u955C\u9762\u677F \u6570\u636E...");
-        const data = {
-          videoDesc: raw.videoDesc,
-          prompt: raw.prompt,
-          track: raw.track,
-          duration: raw.duration,
-          associateAssetsIds: raw.associateAssetsIds ?? [],
-          shouldGenerateImage: raw.shouldGenerateImage
-        };
-        socketQueue(
-          () => new Promise(
-            (resolve3, reject) => socket.emit("addStoryboard", { ...data }, (res) => {
-              if (res?.error) return reject(new Error(res.error));
-              resolve3(res);
-            })
-          )
-        ).then((res) => {
-          thinking.appendText("\u65B0\u589E\u7684\u5206\u955C\u6570\u636E:\n" + JSON.stringify(data, null, 2));
-          thinking.updateTitle("\u65B0\u589E\u5206\u955C\u6210\u529F");
+        const { projectId, scriptId } = resTool.data;
+        if (!projectId || !scriptId) {
+          thinking.appendText("\u7F3A\u5C11 projectId \u6216 scriptId\uFF0C\u65E0\u6CD5\u65B0\u589E\u5206\u955C");
+          thinking.updateTitle("\u65B0\u589E\u5206\u955C\u5931\u8D25(\u7F3A\u5C11\u4E0A\u4E0B\u6587)");
           thinking.complete();
-        }).catch((e) => {
-          thinking.appendText("\u65B0\u589E\u7684\u5206\u955C\u6570\u636E:\n" + JSON.stringify(data, null, 2));
+          return "\u65B0\u589E\u5206\u955C\u5931\u8D25: \u7F3A\u5C11 projectId \u6216 scriptId";
+        }
+        const pageData = {
+          prompt: raw.prompt ?? "",
+          duration: raw.duration ?? 5,
+          track: raw.track,
+          state: "\u5F85\u751F\u6210",
+          src: null,
+          videoDesc: raw.videoDesc,
+          shouldGenerateImage: raw.shouldGenerateImage === "true" ? 1 : 0,
+          associateAssetsIds: raw.associateAssetsIds ?? []
+        };
+        try {
+          const authToken = (resTool.socket?.handshake?.auth || {})["token"];
+          const port = Number(process.env.PORT) || 10588;
+          const baseUrl = `http://127.0.0.1:${port}/api/production/storyboard/batchAddStoryboardInfo`;
+          const headers = {};
+          if (authToken) {
+            const bare = String(authToken).replace(/^Bearer\s+/i, "");
+            const hKey = "authorization";
+            headers[hKey] = `Bearer ${bare}`;
+          }
+          const resp = await axios_default.post(baseUrl, { data: [pageData], scriptId, projectId }, { headers, timeout: 15e3 });
+          const insertedId = resp?.data?.data?.insertedIds?.[0];
+          if (insertedId) {
+            const wbRow = await utils_default.db("o_agentWorkData").where("projectId", String(projectId)).andWhere("episodesId", String(scriptId)).andWhere("key", "productionAgent").first();
+            let wbData = {};
+            if (wbRow && wbRow.data) {
+              try {
+                wbData = JSON.parse(wbRow.data);
+              } catch {
+              }
+            }
+            const sbList = Array.isArray(wbData.storyboard) ? wbData.storyboard : [];
+            sbList.push({
+              id: insertedId,
+              duration: pageData.duration,
+              prompt: pageData.prompt,
+              associateAssetsIds: pageData.associateAssetsIds,
+              src: null,
+              state: pageData.state,
+              videoDesc: pageData.videoDesc,
+              shouldGenerateImage: pageData.shouldGenerateImage,
+              track: pageData.track
+            });
+            wbData.storyboard = sbList;
+            if (wbRow) {
+              await utils_default.db("o_agentWorkData").where({ id: wbRow.id }).update({ data: JSON.stringify(wbData) });
+            } else {
+              await utils_default.db("o_agentWorkData").insert({ projectId, episodesId: scriptId, key: "productionAgent", data: JSON.stringify(wbData) });
+            }
+          }
+          thinking.appendText("\u65B0\u589E\u7684\u5206\u955C\u6570\u636E:\n" + JSON.stringify(pageData, null, 2) + `
+\u5206\u955CID: ${insertedId ?? "?"}`);
+          thinking.updateTitle(`\u65B0\u589E\u5206\u955C\u6210\u529F(ID ${insertedId ?? "?"})`);
+          thinking.complete();
+          return { success: true, id: insertedId };
+        } catch (e) {
+          const errMsg = e?.response?.data?.message || e?.message || "\u65B0\u589E\u5206\u955C\u5931\u8D25";
+          thinking.appendText("\u65B0\u589E\u7684\u5206\u955C\u6570\u636E:\n" + JSON.stringify(pageData, null, 2) + `
+\u9519\u8BEF: ${errMsg}`);
           thinking.updateTitle("\u65B0\u589E\u5206\u955C\u5931\u8D25");
           thinking.complete();
-        });
-        return true;
+          return `\u65B0\u589E\u5206\u955C\u5931\u8D25: ${errMsg}`;
+        }
       }
     })
   };
@@ -258491,8 +258468,8 @@ var productionAgent_default = (nsp) => {
     });
     let abortController = null;
     const thinkConfig = {
-      think: false,
-      thinlLevel: 0
+      think: true,
+      thinlLevel: 2
     };
     socket.on("updateContext", (data, callback) => {
       isolationKey = data.isolationKey;
@@ -259009,8 +258986,8 @@ var scriptAgent_default = (nsp) => {
     });
     let abortController = null;
     const thinkConfig = {
-      think: false,
-      thinlLevel: 0
+      think: true,
+      thinlLevel: 2
     };
     socket.on("chat", async (data) => {
       const { content } = data;
@@ -259268,7 +259245,8 @@ async function startServe(randomPort = false) {
     console.error(err);
     res.status(err.status || 500).send(err);
   });
-  const port = randomPort ? 0 : 10588;
+  const defaultPort = randomPort ? 0 : 10588;
+  const port = process.env.PORT ? Number(process.env.PORT) || defaultPort : defaultPort;
   return await new Promise((resolve3) => {
     server.listen(port, async () => {
       const address = server.address();
