@@ -236912,6 +236912,12 @@ var init_p_limit = __esm({
 });
 
 // src/utils/ai.ts
+function getComfyMediaLimit(vendorId) {
+  if (!comfyMediaLimitByVendor[vendorId]) {
+    comfyMediaLimitByVendor[vendorId] = pLimit(COMFY_MEDIA_CONCURRENCY_PER_VENDOR);
+  }
+  return comfyMediaLimitByVendor[vendorId];
+}
 async function resolveModelName(value) {
   if (AiTypeValues.includes(value)) {
     const agentUseModeVal = await utils_default.db("o_setting").where("key", "agentUseMode").first();
@@ -237021,7 +237027,7 @@ function referenceList2imageBase642(id, input) {
   }
   return input;
 }
-var import_sucrase2, COMFY_MEDIA_CONCURRENCY, comfyMediaLimit, AiTypeValues, AiText, AiImage, AiVideo, AiAudio, ai_default;
+var import_sucrase2, COMFY_MEDIA_CONCURRENCY_PER_VENDOR, comfyMediaLimitByVendor, AiTypeValues, AiText, AiImage, AiVideo, AiAudio, ai_default;
 var init_ai = __esm({
   "src/utils/ai.ts"() {
     "use strict";
@@ -237031,8 +237037,8 @@ var init_ai = __esm({
     import_sucrase2 = __toESM(require_dist5());
     init_p_limit();
     init_utils3();
-    COMFY_MEDIA_CONCURRENCY = 2;
-    comfyMediaLimit = pLimit(COMFY_MEDIA_CONCURRENCY);
+    COMFY_MEDIA_CONCURRENCY_PER_VENDOR = 4;
+    comfyMediaLimitByVendor = {};
     AiTypeValues = [
       "scriptAgent",
       "productionAgent",
@@ -237106,7 +237112,8 @@ var init_ai = __esm({
           await referenceList2imageBase642(mn.split(/:(.+)/)[0], input);
           const vendorId = mn.split(/:(.+)/)[0];
           const doRun = () => fn(input);
-          this.result = vendorId === "comfyui" ? await comfyMediaLimit(doRun) : await doRun();
+          const limit = vendorId.startsWith("comfyui") ? getComfyMediaLimit(vendorId) : null;
+          this.result = limit ? await limit(doRun) : await doRun();
           if (this.result.startsWith("http")) this.result = await urlToBase642(this.result);
           return this;
         };
@@ -237136,7 +237143,8 @@ var init_ai = __esm({
             await referenceList2imageBase642(mn.split(/:(.+)/)[0], input);
             const vendorId = mn.split(/:(.+)/)[0];
             const doRun = () => fn(input);
-            this.result = vendorId === "comfyui" ? await comfyMediaLimit(doRun) : await doRun();
+            const limit = vendorId.startsWith("comfyui") ? getComfyMediaLimit(vendorId) : null;
+            this.result = limit ? await limit(doRun) : await doRun();
             if (this.result.startsWith("http")) this.result = await urlToBase642(this.result);
           };
           if (taskRecord2) {

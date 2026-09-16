@@ -159,14 +159,52 @@ const vendor: VendorConfig = {
         { duration: [4, 5, 8, 10, 12, 15], resolution: ["480p", "720p"] },
       ],
     },
+    // ---- H3 参考生视频 (Ref2VA) 三档位 ----
+    // 2026-09-16 主人指定: ref2va 按三个档位提供三个独立选项; 基准 = 官方轻量版
+    // 03-官方H3轻量版-多参考 工作流 (原生链), 支持 1-9 张参考图
+    // L1 测试档 = 快速预览 0.4MP 画布 (16:9 -> 864x480) + 8 步
+    // L2 微信档 = H3 原生 768P 画布 (16:9 -> 1344x768) + 8 步
+    // L3 质量档 = H3 原生 768P 画布 (16:9 -> 1344x768) + 20 步
     {
-      name: "MiniMax-H3 图片参考生视频",
-      modelName: "h3-ref2va-image",
+      name: "MiniMax-H3 参考生视频 L1 测试档 (预览480p/8步)",
+      modelName: "h3-ref2va-l1",
       type: "video",
-      mode: [["imageReference:1"]],
+      mode: [
+        ["imageReference:1"], ["imageReference:2"], ["imageReference:3"],
+        ["imageReference:4"], ["imageReference:5"], ["imageReference:6"],
+        ["imageReference:7"], ["imageReference:8"], ["imageReference:9"],
+      ],
       audio: false,
       durationResolutionMap: [
-        { duration: [4, 5, 8, 10, 12, 15], resolution: ["480p", "720p"] },
+        { duration: [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], resolution: ["480p"] },
+      ],
+    },
+    {
+      name: "MiniMax-H3 参考生视频 L2 微信档 (原生768P/8步)",
+      modelName: "h3-ref2va-l2",
+      type: "video",
+      mode: [
+        ["imageReference:1"], ["imageReference:2"], ["imageReference:3"],
+        ["imageReference:4"], ["imageReference:5"], ["imageReference:6"],
+        ["imageReference:7"], ["imageReference:8"], ["imageReference:9"],
+      ],
+      audio: false,
+      durationResolutionMap: [
+        { duration: [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], resolution: ["720p"] },
+      ],
+    },
+    {
+      name: "MiniMax-H3 参考生视频 L3 质量档 (原生768P/20步)",
+      modelName: "h3-ref2va-l3",
+      type: "video",
+      mode: [
+        ["imageReference:1"], ["imageReference:2"], ["imageReference:3"],
+        ["imageReference:4"], ["imageReference:5"], ["imageReference:6"],
+        ["imageReference:7"], ["imageReference:8"], ["imageReference:9"],
+      ],
+      audio: false,
+      durationResolutionMap: [
+        { duration: [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], resolution: ["720p"] },
       ],
     },
     {
@@ -244,18 +282,32 @@ function getBaseUrl(): string {
   return (vendor.inputValues.baseUrl || "http://127.0.0.1:8189").replace(/\/+$/, "");
 }
 
-function pickImageDims(aspectRatio: string): { w: number; h: number } {
+// 2026-09-16 改造: 按 ImageConfig.size (1K/2K) 选长边, 步长 32 (适配 H3 / FLUX2 / Qwen-Image)
+// 默认长宽比 16:9 → 1K=1344x768, 2K=2048x1152, 均按 32 倍数取最接近值
+// 9:16 等竖屏: 1K=768x1344, 2K=1152x2048
+// 与视频维度 (pickVideoDims) 保持同一算法规格, 避免图像/视频混合任务尺寸对不上
+function pickImageDims(aspectRatio: string, size: "1K" | "2K" | "4K" = "1K"): { w: number; h: number } {
   const parts = (aspectRatio || "16:9").split(":");
   const aw = parseFloat(parts[0]) || 16;
   const ah = parseFloat(parts[1]) || 9;
-  const base = 1024;
+  // 16:9 标准预设 (主人 2026-09-16 指定: 长宽比 16:9 时直接返回该组)
+  if (aw === 16 && ah === 9) {
+    if (size === "2K" || size === "4K") return { w: 2048, h: 1152 };
+    return { w: 1344, h: 768 };
+  }
+  if (aw === 9 && ah === 16) {
+    if (size === "2K" || size === "4K") return { w: 1152, h: 2048 };
+    return { w: 768, h: 1344 };
+  }
+  // 兜底: 按 size 选长边, 步长 32, 最接近 aw:ah
+  const longSide = (size === "2K" || size === "4K") ? 2048 : 1344;
   if (aw >= ah) {
-    const w = base;
-    const h = Math.round((base * ah) / aw / 8) * 8;
+    const w = longSide;
+    const h = Math.round((longSide * ah) / aw / 32) * 32;
     return { w, h: Math.max(h, 64) };
   } else {
-    const h = base;
-    const w = Math.round((base * aw) / ah / 8) * 8;
+    const h = longSide;
+    const w = Math.round((longSide * aw) / ah / 32) * 32;
     return { w: Math.max(w, 64), h };
   }
 }
@@ -291,6 +343,78 @@ function lengthFromDuration(durationSec: number, fps: number = 24): number {
   }
   return result;
 }
+
+// 2026-09-16: H3 原生几何 — 短边 768 / 最大 768x1344 / 32 对齐
+// 返回 {0,0} = 交给 H3 按 aspect_ratio 自动解析 (16:9 -> 1344x768, 即 H3 原生最大画布)
+function pickH3Dims(aspectRatio: string, resolution: string): { w: number; h: number } {
+  const res = (resolution || "").toLowerCase();
+  if (res.includes("480")) {
+    const parts = (aspectRatio || "16:9").split(":");
+    const aw = parseFloat(parts[0]) || 16;
+    const ah = parseFloat(parts[1]) || 9;
+    if (aw >= ah) {
+      const h = 480;
+      const w = Math.max(32, Math.round((h * aw) / ah / 32) * 32);
+      return { w, h };
+    }
+    const w = 480;
+    const h = Math.max(32, Math.round((w * ah) / aw / 32) * 32);
+    return { w, h };
+  }
+  return { w: 0, h: 0 };
+}
+
+// H3 的 duration_seconds 单位是「秒」(节点硬约束 4.0-15.0)，不是帧数
+function h3DurationSec(lengthFrames: number): number {
+  const sec = lengthFrames / 24;
+  return Math.max(4.0, Math.min(15.0, Math.round(sec * 10) / 10));
+}
+
+// 2026-09-16: H3 原生链 length 口径 —— 必须落在 17k+5 网格上
+// 依据: MiniMaxH3ReferenceToVideo.length schema = {min:5, step:17, default:124, max:3600}
+//      官方轻量版公式 = min(362, max(124, round(sec*24) + (5 - (round(sec*24) % 17)) % 17))
+// 注意: 与 LTX 的 8n+1 / lengthFromDuration 完全不同, 别混用
+function h3LengthFrames(durationSec: number): number {
+  const raw = Math.round(durationSec * 24);
+  const aligned = raw + ((5 - (raw % 17)) % 17);
+  return Math.max(124, Math.min(362, aligned));
+}
+
+// 2026-09-16: H3 两档画布 (数值逐字取自官方轻量版 03-官方H3轻量版-多参考 的 JsonExtractString 表)
+//   preview   = 快速预览 0.4 MP
+//   native768 = H3 原生 768P
+// 两档均按 32 像素对齐
+const H3_PREVIEW_DIMS: Record<string, { w: number; h: number }> = {
+  "21:9": { w: 992, h: 416 },
+  "16:9": { w: 864, h: 480 },
+  "4:3": { w: 736, h: 576 },
+  "1:1": { w: 640, h: 640 },
+  "3:4": { w: 576, h: 736 },
+  "9:16": { w: 480, h: 864 },
+};
+const H3_NATIVE768_DIMS: Record<string, { w: number; h: number }> = {
+  "21:9": { w: 1344, h: 576 },
+  "16:9": { w: 1344, h: 768 },
+  "4:3": { w: 1024, h: 768 },
+  "1:1": { w: 768, h: 768 },
+  "3:4": { w: 768, h: 1024 },
+  "9:16": { w: 768, h: 1344 },
+};
+
+function pickH3Canvas(aspectRatio: string, preset: "preview" | "native768"): { w: number; h: number } {
+  const key = (aspectRatio || "16:9").replace(/\s/g, "");
+  const table = preset === "preview" ? H3_PREVIEW_DIMS : H3_NATIVE768_DIMS;
+  if (table[key]) return table[key];
+  // 兜底: 按 0.4MP / 0.98MP 目标像素保持比例 + 32 对齐
+  const parts = key.split(":");
+  const aw = parseFloat(parts[0]) || 16;
+  const ah = parseFloat(parts[1]) || 9;
+  const targetPx = (preset === "preview" ? 0.4 : 0.98) * 1024 * 1024;
+  const h = Math.max(32, Math.round(Math.sqrt((targetPx * ah) / aw) / 32) * 32);
+  const w = Math.max(32, Math.round((h * aw) / ah / 32) * 32);
+  return { w, h };
+}
+
 
 async function comfyPost(path: string, body: any, timeoutMs = 30_000): Promise<any> {
   const resp = await axiosDirect.post(`${getBaseUrl()}${path}`, body, {
@@ -670,21 +794,21 @@ function buildFlux1T2iMultiRefIPA(prompt: string, width: number, height: number,
 // H3-1: FL2VA 首帧图生视频 (singleImage 模式)
 function buildMiniMaxH3FL2VAFirstFrame(
   prompt: string, firstFrameImg: string,
-  width: number, height: number, length: number, seed: number,
+  aspectRatio: string, width: number, height: number, durationSec: number, seed: number,
 ): any {
   return {
     "1": { class_type: "RHMiniMaxH3TextEncoderLoader", inputs: {
       model_root: "MiniMax-H3", dtype: "auto",
-      text_encoder_path: "qwen3-vl-32b-int8_convrot.safetensors",
+      text_encoder_path: "qwen3-vl-32b",
     }},
     "2": { class_type: "RHMiniMaxH3ModelLoader", inputs: {
       partition: "FL2VA", model_root: "MiniMax-H3", dtype: "auto",
-      transformer_path: "MiniMax-H3-FL2VA-int8_convrot.safetensors",
+      transformer_path: "MiniMax-H3-FL2VA",
     }},
     "3": { class_type: "RHMiniMaxH3VAELoader", inputs: {
       model_root: "MiniMax-H3",
-      video_vae: "MiniMax-H3-video_vae.safetensors",
-      audio_vae: "MiniMax-H3-audio_vae.safetensors",
+      video_vae_path: "MiniMax-H3-video_vae",
+      audio_vae_path: "MiniMax-H3-audio_vae",
     }},
     "4": { class_type: "LoadImage", inputs: { image: firstFrameImg }},
     "5": { class_type: "RHMiniMaxH3FL2VAFirstFrameCondition", inputs: {
@@ -692,7 +816,7 @@ function buildMiniMaxH3FL2VAFirstFrame(
     }},
     "6": { class_type: "RHMiniMaxH3FL2VATarget", inputs: {
       keyframes: ["5", 0],
-      aspect_ratio: "16:9", duration_seconds: length, width, height,
+      aspect_ratio: aspectRatio || "16:9", duration_seconds: durationSec, width, height,
     }},
     "7": { class_type: "RHMiniMaxH3FL2VAEncode", inputs: {
       h3_text_encoder: ["1", 0], h3_vae_bundle: ["3", 0],
@@ -724,86 +848,113 @@ function buildMiniMaxH3FL2VAFirstFrame(
   };
 }
 
-// H3-2: Ref2VA 图片参考 (imageReference 模式, 单张图片参考)
-function buildMiniMaxH3Ref2VAImageRef(
-  prompt: string, refImg: string,
-  width: number, height: number, length: number, seed: number,
+// H3-2 (Ref2VA 图片参考) —— 已废弃删除
+//   2026-09-16: 该 builder 走 RH 链 (RHMiniMaxH3Ref2VAImageReference / RHMiniMaxH3TextEncoderLoader
+//   等), 依赖 diffusers 分区权重, 在 8188 上必然失败。ref2va 三档位统一改走原生链
+//   buildMiniMaxH3Ref2VANative, 故此处整块移除。仅保留可兼容旧 modelName 的 switch 分支。
+
+
+
+// H3-5: 参考生视频 (Ref2VA) —— 原生链
+//   2026-09-16 改版: 原先走 RH 链 (RHMiniMaxH3RefGen 一体化节点), 但 8188 上 RH 链要求的
+//   diffusers 分区权重从未落盘 (E:\99-SD-Models\MiniMax-H3 与 diffusers\MiniMax-H3\{FL2VA,Ref2VA}
+//   各组件目录只有 config.json), RHMiniMaxH3VAELoader 执行期两个分区都解析不到组件 → 任务必失败。
+//   主人指示「必须以官方轻量版工作流为基础进行配置」, 而官方轻量版 03-官方H3轻量版-多参考 用的
+//   正是原生节点, 且 8188 上原生权重齐全 → 整体迁到原生链。
+//
+//   接线 (逐节点对齐官方轻量版子图 hub-h3-key-inputs-base):
+//     UNETLoader(minimax_h3_ref2va_pruned_int8_convrot.safetensors, default)
+//     CLIPLoader(qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors, minimax)
+//     VAELoader(minimax_h3_video_vae_fp16) + VAELoader(minimax_h3_audio_vae_fp32)
+//     KSamplerSelect(res_multistep) + BasicScheduler(simple, steps) + RandomNoise
+//     BasicGuider(model, conditioning) + SamplerCustomAdvanced(...)
+//     MiniMaxH3ReferenceToVideo(clip/vae/audio_vae/prompt/width/height/length/ref_image_size/ref_images.*)
+//     VAEDecode + VAEDecodeAudio + CreateVideo(24fps) + SaveVideo
+//
+//   参考图上限 9; autogrow 槽位 key = "ref_images.ref_image_N"
+//   (依据 comfy_api/latest/_io.py finalize_prefix + nodes_minimax_h3.py:180-183:
+//    io.Autogrow.Input("ref_images", template=TemplatePrefix(input=Image.Input("ref_image"), prefix="ref_image_", max=9)))
+function buildMiniMaxH3Ref2VANative(
+  prompt: string, refImages: string[],
+  width: number, height: number, durationSec: number, seed: number,
+  steps: number,
+  refImageSize: "match" | "max" = "match",
 ): any {
-  return {
-    "1": { class_type: "RHMiniMaxH3TextEncoderLoader", inputs: {
-      partition: "Ref2VA", model_root: "MiniMax-H3", dtype: "auto",
-      text_encoder_path: "qwen3-vl-32b-int8_convrot.safetensors",
+  const length = h3LengthFrames(durationSec);
+  const wf: any = {
+    "1": { class_type: "UNETLoader", inputs: {
+      unet_name: "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+      weight_dtype: "default",
     }},
-    "2": { class_type: "RHMiniMaxH3ModelLoader", inputs: {
-      partition: "Ref2VA", model_root: "MiniMax-H3", dtype: "auto",
-      transformer_path: "MiniMax-H3-Ref2VA-int8_convrot.safetensors",
+    "2": { class_type: "CLIPLoader", inputs: {
+      clip_name: "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+      type: "minimax",
+      device: "default",
     }},
-    "3": { class_type: "RHMiniMaxH3VAELoader", inputs: {
-      model_root: "MiniMax-H3",
-      video_vae: "MiniMax-H3-video_vae.safetensors",
-      audio_vae: "MiniMax-H3-audio_vae.safetensors",
+    "3": { class_type: "VAELoader", inputs: { vae_name: "minimax_h3_video_vae_fp16.safetensors" } },
+    "4": { class_type: "VAELoader", inputs: { vae_name: "minimax_h3_audio_vae_fp32.safetensors" } },
+    "5": { class_type: "KSamplerSelect", inputs: { sampler_name: "res_multistep" } },
+    "6": { class_type: "BasicScheduler", inputs: {
+      model: ["1", 0], scheduler: "simple", steps, denoise: 1.0,
     }},
-    "4": { class_type: "LoadImage", inputs: { image: refImg }},
-    "5": { class_type: "RHMiniMaxH3Ref2VAImageReference", inputs: {
-      image: ["4", 0],
+    "7": { class_type: "RandomNoise", inputs: { noise_seed: seed } },
+    "8": { class_type: "BasicGuider", inputs: { model: ["1", 0], conditioning: ["20", 0] } },
+    "9": { class_type: "SamplerCustomAdvanced", inputs: {
+      noise: ["7", 0], guider: ["8", 0], sampler: ["5", 0], sigmas: ["6", 0], latent_image: ["20", 1],
     }},
-    "6": { class_type: "RHMiniMaxH3Ref2VATarget", inputs: {
-      references: ["5", 0],
-      aspect_ratio: "16:9", duration_seconds: length, width, height,
+    "10": { class_type: "VAEDecode", inputs: { samples: ["9", 0], vae: ["3", 0] } },
+    "11": { class_type: "VAEDecodeAudio", inputs: { samples: ["9", 0], vae: ["4", 0] } },
+    "12": { class_type: "CreateVideo", inputs: {
+      images: ["10", 0], audio: ["11", 0], fps: 24, bit_depth: 8,
     }},
-    "7": { class_type: "RHMiniMaxH3Ref2VAEncode", inputs: {
-      h3_text_encoder: ["1", 0], h3_vae_bundle: ["3", 0],
-      target: ["6", 0], references: ["5", 0],
-      prompt,
-      // strength_mode: "match" (widget 1 默认)
-      strength_mode: "match",
-    }},
-    "8": { class_type: "RHMiniMaxH3EmptyAVLatent", inputs: { target: ["6", 0] }},
-    "9": { class_type: "RHMiniMaxH3DualSigmaSampler", inputs: {
-      h3_model: ["2", 0], conditioning: ["7", 0], av_latent: ["8", 0],
-      seed, sigma_points: 21,
-      video_shift: 12.0, audio_shift: 3.0,
-      accel: "off", denoise_video: true,
-      cache_dit_rdt: 0.12, cache_dit_mc: 2, cache_dit_warmup: 4,
-      velocity_stride: 4,
-      sampler_mode: "res_multistep",
-      allow_accel_with_res_multistep: false,
-    }},
-    "10": { class_type: "RHMiniMaxH3DecodeAV", inputs: {
-      h3_vae_bundle: ["3", 0], sampled_av_latent: ["9", 0],
-    }},
-    "11": { class_type: "CreateVideo", inputs: {
-      images: ["10", 0], audio: ["10", 1], fps: 24, bit_depth: 8,
-    }},
-    "12": { class_type: "SaveVideo", inputs: {
-      video: ["11", 0],
-      filename_prefix: "minimax_h3/ref2va_image",
+    "13": { class_type: "SaveVideo", inputs: {
+      video: ["12", 0],
+      filename_prefix: "minimax_h3/ref2va",
       format: "mp4", codec: "h264",
     }},
   };
+  // 每张参考图一个 LoadImage (节点 30+i), 槽位 key = ref_images.ref_image_N
+  const refInputs: Record<string, any> = {};
+  for (let i = 0; i < refImages.length; i++) {
+    const id = String(30 + i);
+    wf[id] = { class_type: "LoadImage", inputs: { image: refImages[i] } };
+    refInputs[`ref_images.ref_image_${i}`] = [id, 0];
+  }
+  // 主节点 (节点 20): 输出 [0]=CONDITIONING -> BasicGuider, [1]=LATENT -> SamplerCustomAdvanced
+  wf["20"] = { class_type: "MiniMaxH3ReferenceToVideo", inputs: {
+    clip: ["2", 0],
+    vae: ["3", 0],
+    audio_vae: ["4", 0],
+    ...refInputs,
+    prompt,
+    width, height,
+    length,
+    ref_image_size: refImageSize,
+  }};
+  return wf;
 }
 
 // H3-3: T2VA 文生视频+音频 (text 模式, 无参考图)
 function buildMiniMaxH3T2VA(
   prompt: string,
-  width: number, height: number, length: number, seed: number,
+  aspectRatio: string, width: number, height: number, durationSec: number, seed: number,
 ): any {
   return {
     "1": { class_type: "RHMiniMaxH3DirectTextEncoderLoader", inputs: {
       model_root: "MiniMax-H3", dtype: "auto",
-      text_encoder_path: "qwen3-vl-32b-int8_convrot.safetensors",
+      text_encoder_path: "qwen3-vl-32b",
     }},
     "2": { class_type: "RHMiniMaxH3DirectModelLoader", inputs: {
       model_root: "MiniMax-H3", dtype: "auto",
-      transformer_path: "MiniMax-H3-FL2VA-int8_convrot.safetensors",
+      transformer_path: "MiniMax-H3-FL2VA",
     }},
     "3": { class_type: "RHMiniMaxH3DirectVAELoader", inputs: {
       model_root: "MiniMax-H3",
-      video_vae: "MiniMax-H3-video_vae.safetensors",
-      audio_vae: "MiniMax-H3-audio_vae.safetensors",
+      video_vae_path: "MiniMax-H3-video_vae",
+      audio_vae_path: "MiniMax-H3-audio_vae",
     }},
     "4": { class_type: "RHMiniMaxH3T2VATarget", inputs: {
-      aspect_ratio: "16:9", duration_seconds: length, width, height,
+      aspect_ratio: aspectRatio || "16:9", duration_seconds: durationSec, width, height,
     }},
     "5": { class_type: "RHMiniMaxH3T2VATextEncode", inputs: {
       h3_text_encoder: ["1", 0], prompt,
@@ -836,21 +987,21 @@ function buildMiniMaxH3T2VA(
 // H3-4: V2A 视频转音频 (videoReference 模式, 给已有视频加音频)
 function buildMiniMaxH3V2A(
   sourceVideo: string, prompt: string,
-  width: number, height: number, length: number, seed: number,
+  aspectRatio: string, width: number, height: number, durationSec: number, seed: number,
 ): any {
   return {
     "1": { class_type: "RHMiniMaxH3DirectTextEncoderLoader", inputs: {
       model_root: "MiniMax-H3", dtype: "auto",
-      text_encoder_path: "qwen3-vl-32b-int8_convrot.safetensors",
+      text_encoder_path: "qwen3-vl-32b",
     }},
     "2": { class_type: "RHMiniMaxH3DirectModelLoader", inputs: {
       model_root: "MiniMax-H3", dtype: "auto",
-      transformer_path: "MiniMax-H3-FL2VA-int8_convrot.safetensors",
+      transformer_path: "MiniMax-H3-FL2VA",
     }},
     "3": { class_type: "RHMiniMaxH3DirectVAELoader", inputs: {
       model_root: "MiniMax-H3",
-      video_vae: "MiniMax-H3-video_vae.safetensors",
-      audio_vae: "MiniMax-H3-audio_vae.safetensors",
+      video_vae_path: "MiniMax-H3-video_vae",
+      audio_vae_path: "MiniMax-H3-audio_vae",
     }},
     "4": { class_type: "LoadVideo", inputs: { video: sourceVideo }},
     "5": { class_type: "GetVideoComponents", inputs: { video: ["4", 0] }},
@@ -862,7 +1013,7 @@ function buildMiniMaxH3V2A(
       constant_mode: "constant", mode_offset: 0.0,
     }},
     "8": { class_type: "RHMiniMaxH3T2VATarget", inputs: {
-      aspect_ratio: "16:9", duration_seconds: length, width, height,
+      aspect_ratio: aspectRatio || "16:9", duration_seconds: durationSec, width, height,
     }},
     "9": { class_type: "RHMiniMaxH3T2VATextEncode", inputs: {
       h3_text_encoder: ["1", 0], prompt,
@@ -2184,7 +2335,7 @@ const textRequest = (model: TextModel, think: boolean, thinkLevel: 0 | 1 | 2 | 3
 
 const imageRequest = async (config: ImageConfig, model: ImageModel): Promise<string> => {
   if (!vendor.inputValues.baseUrl) throw new Error("缺少 ComfyUI baseUrl 配置");
-  const { w, h } = pickImageDims(config.aspectRatio);
+  const { w, h } = pickImageDims(config.aspectRatio, config.size || "1K");
 
   // ---- reference 图片上传（一次性，重试复用同一张 ref）----
   let refName: string | null = null;
@@ -2349,7 +2500,8 @@ const videoRequest = async (config: VideoConfig, model: VideoModel): Promise<str
   const allRefs = config.referenceList || [];
   for (let i = 0; i < allRefs.length; i++) {
     const r = allRefs[i];
-    if (r.type === "image" && imageRefs.length < 8) {
+    // 2026-09-16: 上限 8 -> 9 (H3 MiniMaxH3ReferenceToVideo.ref_images max=9)
+    if (r.type === "image" && imageRefs.length < 9) {
       const upName = await comfyUploadImage(r.base64, `ref_${Date.now()}_${imageRefs.length}.png`);
       imageRefs.push(upName);
     } else if (r.type === "audio" && audioRefs.length < 2) {
@@ -2359,6 +2511,14 @@ const videoRequest = async (config: VideoConfig, model: VideoModel): Promise<str
   }
   if (imageRefs.length >= 1) startImg = imageRefs[0];
   if (imageRefs.length >= 2) endImg = imageRefs[1];
+
+  // ---- MiniMax-H3 轻量版 (2026-08-26 新增) ----
+  // H3 专用: 画布 (32 对齐, <=768x1344) + 时长 (秒, 4.0-15.0)
+  // 注意: 这三个必须在 switch 之前声明 —— 放到 case 之间会被跳转逻辑跳过,
+  //       触发 TDZ "Cannot access 'h3d' before initialization" (2026-09-16 修)
+  const h3d = pickH3Dims(config.aspectRatio, config.resolution || "480p");
+  const h3sec = h3DurationSec(length);
+  const h3ar = config.aspectRatio || "16:9";
 
   switch (model.modelName) {
     case "ltx-2b-t2v":
@@ -2471,27 +2631,51 @@ const videoRequest = async (config: VideoConfig, model: VideoModel): Promise<str
       if (imageRefs.length < 2) throw new Error("ltx2.3-svd-crossfade 需要 imageReference:2 (段末 + 段首)");
       wf = buildLtxSvdCrossfade(config.prompt, w, h, length, seed, imageRefs[0], imageRefs[1]);
       break;
-    // ---- MiniMax-H3 轻量版 (2026-08-26 新增) ----
     case "h3-fl2va-first":
       // MiniMax-H3 FL2VA 首帧图生视频 (singleImage, 出图+音频)
       if (!startImg) throw new Error("h3-fl2va-first 需要首图 (singleImage)");
-      wf = buildMiniMaxH3FL2VAFirstFrame(config.prompt, startImg, w, h, length, seed);
+      wf = buildMiniMaxH3FL2VAFirstFrame(config.prompt, startImg, h3ar, h3d.w, h3d.h, h3sec, seed);
       break;
+    // ---- H3 参考生视频 (Ref2VA) 三档位 (原生链, 基准 = 官方轻量版 03-官方H3轻量版-多参考) ----
+    // 三档只差「画布 + 步数」: L1 预览0.4MP/8步, L2 原生768P/8步, L3 原生768P/20步
+    // 参考图 1-9 张 (MiniMaxH3ReferenceToVideo.ref_images max=9)
+    case "h3-ref2va-l1":
+    case "h3-ref2va-l2":
+    case "h3-ref2va-l3": {
+      const tier = model.modelName.endsWith("-l1") ? "l1" : model.modelName.endsWith("-l2") ? "l2" : "l3";
+      const canvas = pickH3Canvas(h3ar, tier === "l1" ? "preview" : "native768");
+      const steps = tier === "l3" ? 20 : 8;
+      const refs = imageRefs.length ? imageRefs : (startImg ? [startImg] : []);
+      if (refs.length < 1 || refs.length > 9) {
+        throw new Error(`${model.modelName} 需要 1-9 张图片参考 (实际收到 ${refs.length} 张)`);
+      }
+      // 默认 match (按生成分辨率等比缩小, 比 max 显存友好); max 需 >2× 显存
+      const refImageSize: "match" | "max" = (config as any).refImageSize === "max" ? "max" : "match";
+      wf = buildMiniMaxH3Ref2VANative(config.prompt, refs, canvas.w, canvas.h, h3sec, seed, steps, refImageSize);
+      break;
+    }
+    // 兼容旧 modelName (2026-09-16 之前是 h3-ref2va-image / h3-ref-multi, 走已废弃的 RH 链)
+    // 一律按 L2 微信档 (原生 768P / 20 步) 处理, 避免老项目硬失败
     case "h3-ref2va-image":
-      // MiniMax-H3 Ref2VA 图片参考生视频 (imageReference:1)
-      if (!startImg) throw new Error("h3-ref2va-image 需要图片参考 (imageReference:1)");
-      wf = buildMiniMaxH3Ref2VAImageRef(config.prompt, startImg, w, h, length, seed);
+    case "h3-ref-multi": {
+      const refs = imageRefs.length ? imageRefs : (startImg ? [startImg] : []);
+      if (refs.length < 1 || refs.length > 9) {
+        throw new Error(`${model.modelName} 需要 1-9 张图片参考 (实际收到 ${refs.length} 张)`);
+      }
+      const canvas = pickH3Canvas(h3ar, "native768");
+      wf = buildMiniMaxH3Ref2VANative(config.prompt, refs, canvas.w, canvas.h, h3sec, seed, 20, "match");
       break;
+    }
     case "h3-t2va":
       // MiniMax-H3 T2VA 文生视频+音频 (text)
-      wf = buildMiniMaxH3T2VA(config.prompt, w, h, length, seed);
+      wf = buildMiniMaxH3T2VA(config.prompt, h3ar, h3d.w, h3d.h, h3sec, seed);
       break;
     case "h3-v2a":
       // MiniMax-H3 V2A 视频转音频 (videoReference:1)
       // 复用 startImg 变量名 — 但实际是 video, 来源 config.referenceList[0].type==='video'
       // 视频上传到 8188 input 目录后文件名
       if (!startImg) throw new Error("h3-v2a 需要视频参考 (videoReference:1, 走 startImg 变量)");
-      wf = buildMiniMaxH3V2A(startImg, config.prompt, w, h, length, seed);
+      wf = buildMiniMaxH3V2A(startImg, config.prompt, h3ar, h3d.w, h3d.h, h3sec, seed);
       break;
     case "hunyuan-t2v":
       // 2026-08-13: Hunyuan Video kijai 节点需要 llava-llama-3-8b-text-encoder (未下), 暂时未实现

@@ -5,12 +5,20 @@ import { transform } from "sucrase";
 import pLimit from "p-limit";
 import u from "@/utils";
 
-// 2026-08-31: 全局并发信号量, 仅对 comfyui 供应商的图像/视频生成限流.
-// 所有项目(即使同时跑多个 test 项目)、所有链路(分镜图/图生视频/文生视频)共享同一个信号量,
-// 保证同时打到 ComfyUI 的任务总数恒 ≤2, 防止多个项目叠加把本机 16GB 显存干崩.
-// 16GB 卡经验值: flux2-multiref/图生视频单任务峰值 ~8GB, 并发 2 ≈ 16GB 边界.
-const COMFY_MEDIA_CONCURRENCY = 2;
-const comfyMediaLimit = pLimit(COMFY_MEDIA_CONCURRENCY);
+// 2026-09-16 改造: 双 ComfyUI 供应商, 各自一张闸, 每张 ≤4.
+//   - comfyui        → RTX 5060 Ti 16GB  (主卡, 默认)
+//   - comfyui-8189   → RTX 3070 Ti 8GB   (副卡, 仅在 vendorId 以 "comfyui" 开头时受闸)
+// 旧逻辑是单张闸 comfyMediaLimit = pLimit(2), 8189 完全不受限(任意并发) -> 显存失控.
+// 新逻辑: 维护 Map<vendorId, pLimit>, 每个 vendor 各自 ≤4.
+// 注意: 图像 + 视频共享同一张闸(链路间互斥); imageTest 等同步路径不走此闸.
+const COMFY_MEDIA_CONCURRENCY_PER_VENDOR = 4;
+const comfyMediaLimitByVendor: Record<string, ReturnType<typeof pLimit>> = {};
+function getComfyMediaLimit(vendorId: string): ReturnType<typeof pLimit> {
+  if (!comfyMediaLimitByVendor[vendorId]) {
+    comfyMediaLimitByVendor[vendorId] = pLimit(COMFY_MEDIA_CONCURRENCY_PER_VENDOR);
+  }
+  return comfyMediaLimitByVendor[vendorId];
+}
 
 type AiType =
   | "scriptAgent"
@@ -265,10 +273,8 @@ class AiImage {
       // comfyui 供应商走全局信号量限制并发; 其他厂商不限
       const vendorId = mn.split(/:(.+)/)[0];
       const doRun = () => fn(input);
-      this.result =
-        vendorId === "comfyui"
-          ? await comfyMediaLimit(doRun)
-          : await doRun();
+      const limit = vendorId.startsWith("comfyui") ? getComfyMediaLimit(vendorId) : null;
+      this.result = limit ? await limit(doRun) : await doRun();
       if (this.result.startsWith("http")) this.result = await urlToBase64(this.result);
       return this;
     };
@@ -319,10 +325,8 @@ class AiVideo {
         // comfyui 供应商走全局信号量限制并发; 其他厂商不限
         const vendorId = mn.split(/:(.+)/)[0];
         const doRun = () => fn(input);
-        this.result =
-          vendorId === "comfyui"
-            ? await comfyMediaLimit(doRun)
-            : await doRun();
+        const limit = vendorId.startsWith("comfyui") ? getComfyMediaLimit(vendorId) : null;
+        this.result = limit ? await limit(doRun) : await doRun();
 
         if (this.result.startsWith("http")) this.result = await urlToBase64(this.result);
       };
