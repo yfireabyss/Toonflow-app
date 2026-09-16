@@ -56,7 +56,7 @@ description: >-
 **特征**：仅写入视频描述与资产绑定，不生成提示词、不生成分镜图。**以分镜表已有的「组」为写入单位**——不自行分组，每个组写入一条分镜（一次 `add_flowData_storyboard` 调用）。严格线性，自洽，零条件分支。
 
 **第 1 步 · 读取数据**
-同轮调用 `get_flowData("script")`、`get_flowData("storyboardTable")`。**本模式不加载任何提示词技法**（无需 `storyboard_prompt_techniques` / `director_storyboard`）。分镜表已按「场（`## 场N`）→ 组（`### 第N组`）」预先分组，本模式**直接沿用表内分组，不再自行做 ≤15s 分组**。
+同轮调用 `get_flowData("script")`、`get_flowData("storyboardTable")`。**本模式不加载任何提示词技法**（无需 `storyboard_prompt_techniques` / `director_storyboard`）。分镜表已按「场（`## 场N`）→ 组（`### 第N组`）」预先分组，本模式**直接沿用表内分组，不再自行做 ≤12s 分组**。
 
 **第 2 步 · 逐组写入视频描述（videoDesc）**
 以分镜表的每个「组」为单位，按以下**固定顺序**拼接写入 `videoDesc`：
