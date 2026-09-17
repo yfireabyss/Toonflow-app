@@ -136,7 +136,7 @@ const vendor: VendorConfig = {
   version: "2.0",
   author: "Mavis (本机 ComfyUI 适配 v2)",
   name: "本机 ComfyUI 8189 (3070Ti)",
-  description: "## 本机 ComfyUI 直连供应商 v2（8189 / RTX 3070 Ti 8GB）\n\n通过本机 ComfyUI 8189 (RTX 3070 Ti) HTTP API 调用本机已部署的 ComfyUI 出图/出视频。\n\n提供 12 个模型：5 个图像生成（Qwen-Image 2 + FLUX2 3）、6 个视频生成（MiniMax-H3 6）、1 个文本占位（noop-text）。\n\n> ⚠️ 本实例运行在 RTX 3070 Ti（8GB 显存），与 8188（5060 Ti 16GB）共享同一套本机模型库。MiniMax-H3 全量任务（文生视频、音频/视频多模态参考）在 8GB 卡上极易 OOM；本实例建议只跑轻量图像模型（z-image-turbo / sdxl-t2i / hires-fix / upscale-usdu）与低分辨率短时长 LTX 任务，重负载 H3 请改走 8188。\n\n**跑不通**（本机缺模型/节点）：FireRed-Edit / SCAIL / Qwen3-TTS / Qwen-2511",  inputs: [
+  description: "## 本机 ComfyUI 直连供应商 v2（8189 / RTX 3070 Ti 8GB）\n\n通过本机 ComfyUI 8189 (RTX 3070 Ti) HTTP API 调用本机已部署的 ComfyUI 出图/出视频。\n\n提供 12 个模型：5 个图像生成（Qwen-Image 2 + FLUX2 3）、6 个视频生成（MiniMax-H3 6）、1 个文本占位（noop-text）。\n\n> ⚠️ 本实例运行在 RTX 3070 Ti（8GB 显存），与 8188（5060 Ti 16GB）共享同一套本机模型库。MiniMax-H3 全量任务（文生视频、音频/视频多模态参考）在 8GB 卡上极易 OOM；本实例建议只跑图片类任务（flux2-t2i / flux2-t2i-multiref / flux2-turbo-lora / qwen-image-t2i / qwen-image-edit）；重负载 H3 任务请改走 8188。\n\n**跑不通**（本机缺模型/节点）：FireRed-Edit / SCAIL / Qwen3-TTS / Qwen-2511",  inputs: [
     { key: "baseUrl", label: "ComfyUI 服务地址", type: "url", required: true, placeholder: "http://127.0.0.1:8189" },
     { key: "apiKey", label: "ComfyUI API Key（可选，本机无 auth 留空）", type: "password", required: false, placeholder: "本机默认无认证，留空" },
   ],

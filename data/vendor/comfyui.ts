@@ -136,7 +136,7 @@ const vendor: VendorConfig = {
   version: "2.0",
   author: "Mavis (本机 ComfyUI 适配 v2)",
   name: "本机 ComfyUI v2",
-  description: "## 本机 ComfyUI 直连供应商 v2\n\n通过本机 ComfyUI 8188 HTTP API 调用本机已部署的 ComfyUI 出图/出视频。\n\n提供 12 个模型：5 个图像生成（Qwen-Image 2 + FLUX2 3）、6 个视频生成（MiniMax-H3 6）、1 个文本占位（noop-text）。\n\n> ⚠️ MiniMax-H3 需较高显存（面向 24GB 显卡）。在本机 16GB 显卡上，重负载任务（文生视频、音频/视频多模态参考）可能导致 ComfyUI 崩溃；请优先使用轻量的 FL2VA 首帧/首尾帧/Ref2VA 图片，或改用更稳的 LTX-2.3。\n\n**跑不通**（本机缺模型/节点）：FireRed-Edit / SCAIL / Qwen3-TTS / Qwen-2511",  inputs: [
+  description: "## 本机 ComfyUI 直连供应商 v2\n\n通过本机 ComfyUI 8188 HTTP API 调用本机已部署的 ComfyUI 出图/出视频。\n\n提供 12 个模型：5 个图像生成（Qwen-Image 2 + FLUX2 3）、6 个视频生成（MiniMax-H3 6）、1 个文本占位（noop-text）。\n\n> ⚠️ MiniMax-H3 需较高显存（面向 24GB 显卡）。在本机 16GB 显卡上，重负载任务（文生视频、音频/视频多模态参考）可能导致 ComfyUI 崩溃；请优先使用首帧/首尾帧驱动的 h3-fl2va-first，或图片参考驱动的 h3-ref2va-l1 / h3-ref2va-l2 / h3-ref2va-l3。\n\n**跑不通**（本机缺模型/节点）：FireRed-Edit / SCAIL / Qwen3-TTS / Qwen-2511",  inputs: [
     { key: "baseUrl", label: "ComfyUI 服务地址", type: "url", required: true, placeholder: "http://127.0.0.1:8188" },
     { key: "apiKey", label: "ComfyUI API Key（可选，本机无 auth 留空）", type: "password", required: false, placeholder: "本机默认无认证，留空" },
   ],
